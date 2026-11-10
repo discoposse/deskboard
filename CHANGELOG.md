@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Deskboard MCP server in `mcp/deskboard_mcp.py`. Stdio with the standard library, optional streamable HTTP on 127.0.0.1 through the `mcp` SDK. Tools are `post_status`, `list_tiles`, `read_tile`, and `board_status`. Posts go only to list tiles managed by `bots` unless `DESKBOARD_ALLOW_ANY_LIST=1`. `docs/mcp.md` covers Cursor, Claude Desktop, and other stdio clients.
+
 - Managed tiles. An optional `managed_by` on any widget marks it as filled by a bot. The configurator shows its content read-only and still edits its size, order, and visibility. Apply sends `keep_managed`, so it never writes over a bot's content.
 - Layout revisions. `GET /api/widgets` returns `revision` and `layout_revision`, also as headers. `If-Match` or `base_revision` makes a write conditional, and a stale write gets `409`. The configurator shows a notice with **Reload from board** instead of overwriting. Writes without a revision work as before.
 - `POST /api/widgets/{id}/post` adds a timestamped line to a list tile, keeps the newest `max_items` (default 6), and never creates a tile. `scripts/post.sh` wraps it.

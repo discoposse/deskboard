@@ -106,7 +106,7 @@ Mark a list tile with `"managed_by": "bots"` and any script or assistant can add
 scripts/post.sh botstatus Backup "Nightly backup finished"
 ```
 
-The configurator keeps a managed tile's content read-only and refuses to apply over a newer layout. [How to get your bot to update your Deskboard](docs/bots.md#how-to-get-your-bot-to-update-your-deskboard) has the curl call and a prompt you can paste into any AI assistant.
+The configurator keeps a managed tile's content read-only and refuses to apply over a newer layout. [How to get your bot to update your Deskboard](docs/bots.md#how-to-get-your-bot-to-update-your-deskboard) has the curl call and a prompt you can paste into any AI assistant. For assistants that speak MCP, [docs/mcp.md](docs/mcp.md) sets up the Deskboard MCP server, which can post status lines and read tiles and nothing else.
 
 ## Install as a desk kiosk (Ubuntu)
 
@@ -137,6 +137,7 @@ Anything on the board is readable by every device that can reach the port. Keep 
 - [Widget reference](docs/widgets.md)
 - [Tile catalog](docs/tiles.md)
 - [Bots and managed tiles](docs/bots.md), including how to get your bot to update your Deskboard
+- [MCP server](docs/mcp.md)
 - [Theme guide](docs/themes.md)
 - [Ubuntu kiosk install](docs/install-ubuntu.md)
 - [Security](docs/security.md)

@@ -111,7 +111,7 @@ curl -sS -X POST http://<your-board-url>:8730/api/widgets/botstatus/post \
 
 The example shows up on the board as `4:12 PM  Inbox bot  3 invoices need approval today`.
 
-A Deskboard MCP server is planned, so assistants that speak MCP can post without a shell command. Until it ships, use the curl call above.
+Assistants that speak MCP can skip the shell command. Run the Deskboard MCP server in `mcp/` and the assistant gets a `post_status` tool with the same rules built in. [mcp.md](mcp.md) has setup for Cursor, Claude Desktop, and other stdio clients.
 
 ## Security
 
