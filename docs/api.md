@@ -4,7 +4,7 @@ Base URL for local work: `http://127.0.0.1:8730`.
 
 Mutations need `Content-Type: application/json`. There is no CORS and no API token. Reachability is the boundary. Browser pages on other origins cannot call it. `curl` and scripts can.
 
-Errors look like `{"error":"..."}`. Useful codes: `400` validation, `403` peer not allowed, `404` missing, `409` conflict (duplicate id, second singleton, widget cap), `413` body over 64KB, `415` wrong content type.
+Errors look like `{"error":"..."}`. Useful codes are `400` validation, `403` peer not allowed, `404` missing, `409` conflict (duplicate id, second singleton, widget cap, stale revision), `413` body over 64KB, `415` wrong content type.
 
 ## Routes
 
@@ -23,6 +23,7 @@ PATCH  /api/widgets/{id}
 DELETE /api/widgets/{id}
 PUT    /api/widgets/order
 PUT    /api/widgets/import
+POST   /api/widgets/{id}/post
 GET    /api/widget-data/{id}
 GET    /api/github
 ```
@@ -37,13 +38,17 @@ GET    /api/github
 
 ## Widgets
 
-Every widget has `id`, `type`, `enabled`, `order`, `col_span`, `row_span` (spans are `1` or `2`). Type-specific fields are listed in [widgets.md](widgets.md).
+Every widget has `id`, `type`, `enabled`, `order`, `col_span`, `row_span` (spans are `1` or `2`). Any widget may also carry `managed_by`, a short lowercase owner name such as `bots`. Type-specific fields are listed in [widgets.md](widgets.md).
 
 Unknown fields are rejected. Send only the fields you mean to change on `PATCH`.
 
 `PUT /api/widgets/order` body: `{"ids":["clock","stats",...]}` with every id once.
 
-`PUT /api/widgets/import` body: `{"widgets":[...]}` replaces the whole layout atomically.
+`PUT /api/widgets/import` with `{"widgets":[...]}` replaces the whole layout atomically. Two optional keys exist. `base_revision` makes the import conditional, and `keep_managed: true` keeps the stored content of managed tiles and takes only their layout from the request.
+
+`GET /api/widgets` returns `{"widgets": [...], "revision": 12, "layout_revision": 11}`. Widget responses carry the same numbers in `X-Deskboard-Revision` and `X-Deskboard-Layout-Revision`. Send `If-Match: <layout_revision>` on any widget write to make it conditional. A stale write gets `409` with `"stale": true` and changes nothing. Writes without a revision are not checked.
+
+`POST /api/widgets/{id}/post` with `{"source":"Backup","text":"Nightly backup finished"}` adds a timestamped line to the top of a list tile and keeps the newest `max_items`. It returns `404` for a missing or hidden tile and never creates one. See [bots.md](bots.md).
 
 ## Tiles
 

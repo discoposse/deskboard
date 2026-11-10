@@ -11,6 +11,7 @@ import json
 import os
 import re
 import secrets
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -53,7 +54,7 @@ TYPE_FIELDS = {
     "stats": {"fields"},
     "note": {"title", "text"},
     "markdown": {"title", "text"},
-    "list": {"title", "items"},
+    "list": {"title", "items", "max_items"},
     "weather": {"latitude", "longitude", "label", "units"},
     "countdown": {"title", "target", "label"},
     "calendar": {"title", "url", "limit"},
@@ -65,7 +66,13 @@ TYPE_FIELDS = {
     "status": {"title", "targets"},
     "theme_card": {"image", "caption"},
 }
-COMMON_FIELDS = {"id", "type", "enabled", "order", "col_span", "row_span"}
+COMMON_FIELDS = {"id", "type", "enabled", "order", "col_span", "row_span", "managed_by"}
+# Fields that place a tile on the board. Everything else is content.
+LAYOUT_FIELDS = {"id", "type", "enabled", "order", "col_span", "row_span", "managed_by"}
+MANAGED_RE = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
+POST_DEFAULT_ITEMS = 6
+POST_SOURCE_MAX = 24
+POST_LINE_MAX = 80
 OUTPUT_KEYS = (
     "id",
     "type",
@@ -73,6 +80,7 @@ OUTPUT_KEYS = (
     "order",
     "col_span",
     "row_span",
+    "managed_by",
     "title",
     "text",
     "label",
@@ -80,6 +88,7 @@ OUTPUT_KEYS = (
     "hint",
     "trend",
     "items",
+    "max_items",
     "fields",
     "style",
     "show_seconds",
@@ -127,6 +136,34 @@ class WidgetError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+class StaleRevision(WidgetError):
+    """The caller loaded the layout before someone else changed it."""
+
+    def __init__(self, base: int, current: int):
+        super().__init__(
+            f"the board changed since you loaded it (you had revision {base}, it is now {current}). Reload and apply again.",
+            409,
+        )
+        self.base = base
+        self.current = current
+
+
+def _check_base(base, meta: dict) -> None:
+    """base_revision is optional. When given it must match layout_revision,
+    which moves on every write except a bot filling a managed tile."""
+    if base is None:
+        return
+    if isinstance(base, bool) or not isinstance(base, int) or base < 0:
+        raise WidgetError("base_revision must be a non-negative integer")
+    if base != meta["layout_revision"]:
+        raise StaleRevision(base, meta["layout_revision"])
+
+
+def revision() -> dict:
+    """Current {"revision", "layout_revision"} without changing anything."""
+    return _transaction(lambda: _read()[2])
 
 
 def catalog() -> tiles.Catalog:
@@ -200,12 +237,16 @@ def max_widgets() -> int:
 
 
 def list_widgets() -> list[dict]:
+    return list_widgets_with_revision()[0]
+
+
+def list_widgets_with_revision() -> tuple[list[dict], dict]:
     def run():
-        widgets, dirty = _read()
+        widgets, dirty, meta = _read()
         widgets.sort(key=_sort_key)
         if dirty:
-            _save(widgets)
-        return widgets
+            meta = _save(widgets, meta)
+        return widgets, meta
 
     return _transaction(run)
 
@@ -217,7 +258,7 @@ def get_widget(widget_id: str) -> dict:
     raise WidgetError("widget not found", 404)
 
 
-def create_widget(data: dict) -> dict:
+def create_widget(data: dict, base_revision=None) -> dict:
     if not isinstance(data, dict):
         raise WidgetError("body must be an object")
     widget_type = data.get("type")
@@ -225,7 +266,8 @@ def create_widget(data: dict) -> dict:
     _reject_unknown(data, _fields_for(widget_type) | COMMON_FIELDS)
 
     def run():
-        widgets, _dirty = _read()
+        widgets, _dirty, meta = _read()
+        _check_base(base_revision, meta)
         limit = max_widgets()
         if len(widgets) >= limit:
             raise WidgetError(f"a screen holds up to {limit} widgets", 409)
@@ -236,50 +278,56 @@ def create_widget(data: dict) -> dict:
         widget = _build(widget_type, data, widget_id, order, previous=None)
         widgets.append(widget)
         widgets.sort(key=_sort_key)
-        _save(widgets)
+        _save(widgets, meta)
         return widget
 
     return _transaction(run)
 
 
-def update_widget(widget_id: str, data: dict) -> dict:
+def update_widget(widget_id: str, data: dict, base_revision=None) -> dict:
     if not isinstance(data, dict):
         raise WidgetError("body must be an object")
     if not data:
         raise WidgetError("body must change at least one field")
 
     def run():
-        widgets, _dirty = _read()
+        widgets, _dirty, meta = _read()
+        _check_base(base_revision, meta)
         current = next((item for item in widgets if item["id"] == widget_id), None)
         if current is None:
             raise WidgetError("widget not found", 404)
-        _reject_unknown(data, _fields_for(current["type"]) | {"enabled", "order", "col_span", "row_span"})
+        _reject_unknown(data, _fields_for(current["type"]) | {"enabled", "order", "col_span", "row_span", "managed_by"})
         order = current["order"] if "order" not in data else _require_order(data["order"])
         widget = _build(current["type"], data, widget_id, order, previous=current)
         widgets = [widget if item["id"] == widget_id else item for item in widgets]
         widgets.sort(key=_sort_key)
-        _save(widgets)
+        # A bot refreshing the content of its own managed tile does not make
+        # an open configurator stale. Its Apply keeps managed content anyway.
+        content_only = bool(current.get("managed_by")) and not (set(data) & LAYOUT_FIELDS)
+        _save(widgets, meta, layout=not content_only)
         return widget
 
     return _transaction(run)
 
 
-def delete_widget(widget_id: str) -> None:
+def delete_widget(widget_id: str, base_revision=None) -> None:
     def run():
-        widgets, _dirty = _read()
+        widgets, _dirty, meta = _read()
+        _check_base(base_revision, meta)
         if not any(item["id"] == widget_id for item in widgets):
             raise WidgetError("widget not found", 404)
-        _save([item for item in widgets if item["id"] != widget_id])
+        _save([item for item in widgets if item["id"] != widget_id], meta)
 
     _transaction(run)
 
 
-def reorder_widgets(ids: list) -> list[dict]:
+def reorder_widgets(ids: list, base_revision=None) -> list[dict]:
     if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
         raise WidgetError("ids must be a list of widget ids")
 
     def run():
-        widgets, _dirty = _read()
+        widgets, _dirty, meta = _read()
+        _check_base(base_revision, meta)
         current = sorted(widgets, key=_sort_key)
         current_ids = [item["id"] for item in current]
         if len(ids) != len(set(ids)) or sorted(ids) != sorted(current_ids):
@@ -290,13 +338,17 @@ def reorder_widgets(ids: list) -> list[dict]:
             widget = dict(by_id[widget_id])
             widget["order"] = index * 10
             ordered.append(_present(widget))
-        _save(ordered)
+        _save(ordered, meta)
         return ordered
 
     return _transaction(run)
 
 
-def replace_widgets(docs: list) -> list[dict]:
+def replace_widgets(docs: list, base_revision=None, keep_managed: bool = False) -> list[dict]:
+    """Replace the whole layout. With keep_managed, a tile that is managed on
+    the server keeps its stored content and managed_by, and only its layout
+    (order, spans, enabled) comes from the request. The configurator sends
+    keep_managed so it never writes over what a bot posted."""
     if not isinstance(docs, list):
         raise WidgetError("widgets must be a list")
     limit = max_widgets()
@@ -304,6 +356,9 @@ def replace_widgets(docs: list) -> list[dict]:
         raise WidgetError(f"a screen holds up to {limit} widgets", 409)
 
     def run():
+        stored, _dirty, meta = _read()
+        _check_base(base_revision, meta)
+        managed = {w["id"]: w for w in stored if w.get("managed_by")} if keep_managed else {}
         built = []
         seen = set()
         for index, item in enumerate(docs):
@@ -323,12 +378,69 @@ def replace_widgets(docs: list) -> list[dict]:
             order = item.get("order")
             if order is None:
                 order = index * 10
+            owner = managed.get(widget_id)
+            if owner is not None and owner["type"] == widget_type:
+                layout = {key: item[key] for key in ("enabled", "col_span", "row_span") if key in item}
+                built.append(_build(widget_type, layout, widget_id, _require_order(order), previous=owner))
+                continue
             built.append(_build(widget_type, item, widget_id, _require_order(order), previous=None))
         built.sort(key=_sort_key)
-        _save(built)
+        _save(built, meta)
         return built
 
     return _transaction(run)
+
+
+def post_line(widget_id: str, data: dict) -> dict:
+    """Prepend "H:MM AM  Source  text" to a list tile and keep the newest
+    max_items lines. Never creates a widget. A missing or hidden tile is 404."""
+    if not isinstance(data, dict):
+        raise WidgetError("body must be an object")
+    _reject_unknown(data, {"source", "text"})
+    source = data.get("source")
+    text = data.get("text")
+    if not isinstance(source, str) or not isinstance(text, str):
+        raise WidgetError('body must be {"source": "...", "text": "..."}')
+    if _has_control(source) or _has_control(text) or "\n" in source or "\n" in text or "\x7f" in source + text:
+        raise WidgetError("source and text must be one plain line")
+    source = " ".join(source.split())
+    text = " ".join(text.split())
+    if not source or not text:
+        raise WidgetError("source and text must not be empty")
+    if len(source) > POST_SOURCE_MAX:
+        source = source[: POST_SOURCE_MAX - 1].rstrip() + "…"
+
+    def run():
+        widgets, _dirty, meta = _read()
+        current = next((item for item in widgets if item["id"] == widget_id), None)
+        if current is None or not current["enabled"]:
+            raise WidgetError("widget not found", 404)
+        if current["type"] != "list":
+            raise WidgetError("only list tiles take posts", 409)
+        stamp = _clock_stamp()
+        head = f"{stamp}  {source}  "
+        room = POST_LINE_MAX - len(head)
+        body = text if len(text) <= room else text[: max(room - 1, 1)].rstrip() + "…"
+        keep = current.get("max_items", POST_DEFAULT_ITEMS)
+        items = ([head + body] + list(current["items"]))[:keep]
+        widget = _build("list", {"items": items}, widget_id, current["order"], previous=current)
+        widgets = [widget if item["id"] == widget_id else item for item in widgets]
+        widgets.sort(key=_sort_key)
+        # A post changes content only, so an open configurator stays current.
+        _save(widgets, meta, layout=False)
+        return widget
+
+    return _transaction(run)
+
+
+def _clock_stamp(now: datetime | None = None) -> str:
+    try:
+        zone = ZoneInfo(load_config().get("timezone") or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = ZoneInfo("UTC")
+    moment = (now or datetime.now(zone)).astimezone(zone)
+    hour = moment.hour % 12 or 12
+    return f"{hour}:{moment.minute:02d} {'AM' if moment.hour < 12 else 'PM'}"
 
 
 def _choose_id(requested, widgets: list[dict]) -> str:
@@ -381,6 +493,9 @@ def _build(widget_type: str, data: dict, widget_id: str, order: int, previous: d
         "col_span": _span(data, previous, "col_span", spec.get("col_span", 1)),
         "row_span": _span(data, previous, "row_span", spec.get("row_span", 1)),
     }
+    owner = _managed_by(data, previous)
+    if owner:
+        widget["managed_by"] = owner
     if tile is not None:
         try:
             widget.update(tiles.build_fields(spec, data, previous))
@@ -449,6 +564,11 @@ def _build_list(widget: dict, data: dict, previous: dict | None) -> None:
         widget["items"] = _items(data.get("items"))
     else:
         widget["items"] = list(previous["items"])
+    if "max_items" in data:
+        if data["max_items"] is not None:
+            widget["max_items"] = _int_range(data, previous, "max_items", 1, 8, POST_DEFAULT_ITEMS)
+    elif previous is not None and "max_items" in previous:
+        widget["max_items"] = previous["max_items"]
 
 
 def _build_weather(widget: dict, data: dict, previous: dict | None) -> None:
@@ -516,6 +636,18 @@ def _build_theme_card(widget: dict, data: dict, previous: dict | None) -> None:
     if "/" in widget["image"] or "\\" in widget["image"] or ".." in widget["image"]:
         raise WidgetError("image must be a preset name")
     widget["caption"] = _optional_text(data, previous, "caption", 64)
+
+
+def _managed_by(data: dict, previous: dict | None) -> str:
+    """Optional owner tag such as "bots" or "calendar". "" or null clears it."""
+    if "managed_by" not in data:
+        return "" if previous is None else previous.get("managed_by", "")
+    value = data["managed_by"]
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or not MANAGED_RE.match(value):
+        raise WidgetError("managed_by must be a short lowercase name such as bots or calendar")
+    return value
 
 
 def _enabled(data: dict, previous: dict | None) -> bool:
@@ -789,7 +921,7 @@ def _sort_key(widget: dict) -> tuple:
 def _present(widget: dict) -> dict:
     tile = catalog().get(widget.get("type"))
     if tile is not None:
-        keys = ("id", "type", "enabled", "order", "col_span", "row_span") + tuple(tile.fields)
+        keys = ("id", "type", "enabled", "order", "col_span", "row_span", "managed_by") + tuple(tile.fields)
         return {key: widget[key] for key in keys if key in widget}
     return {key: widget[key] for key in OUTPUT_KEYS if key in widget}
 
@@ -801,15 +933,19 @@ def _default_widgets() -> list[dict]:
     return widgets
 
 
-def _read() -> tuple[list[dict], bool]:
+def _read() -> tuple[list[dict], bool, dict]:
     if not PATH.exists():
-        return _default_widgets(), True
+        return _default_widgets(), True, {"revision": 0, "layout_revision": 0}
     try:
         raw = json.loads(PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise WidgetError(f"widgets.json could not be parsed: {exc}", 500) from exc
     if not isinstance(raw, dict) or not isinstance(raw.get("widgets"), list):
         raise WidgetError("widgets.json is missing a widgets list", 500)
+    meta = {}
+    for key in ("revision", "layout_revision"):
+        value = raw.get(key, 0)
+        meta[key] = value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
     widgets = []
     seen = set()
     for item in raw["widgets"]:
@@ -835,14 +971,19 @@ def _read() -> tuple[list[dict], bool]:
             widgets.append(_build(widget_type, kept, widget_id, _require_order(order), previous=None))
         except WidgetError as exc:
             raise WidgetError(f"widgets.json has an invalid widget: {exc}", 500) from exc
-    return widgets, False
+    return widgets, False, meta
 
 
-def _save(widgets: list[dict]) -> None:
-    payload = {"widgets": [_present(widget) for widget in widgets]}
+def _save(widgets: list[dict], meta: dict, layout: bool = True) -> dict:
+    """Write widgets.json and bump the revision. layout=False is for writes
+    that only change a managed tile's content."""
+    revision = meta["revision"] + 1
+    fresh = {"revision": revision, "layout_revision": revision if layout else meta["layout_revision"]}
+    payload = {**fresh, "widgets": [_present(widget) for widget in widgets]}
     temporary = PATH.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(temporary, PATH)
+    return fresh
 
 
 def _transaction(fn):

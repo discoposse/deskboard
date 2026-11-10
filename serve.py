@@ -29,17 +29,21 @@ from fetches import (
 from widgets import (
     ID_RE,
     SINGLETONS,
+    StaleRevision,
     WidgetError,
     catalog,
     create_widget,
     delete_widget,
     get_widget,
     list_widgets,
+    list_widgets_with_revision,
     max_widgets,
+    post_line,
     reload_catalog,
     reload_summary,
     reorder_widgets,
     replace_widgets,
+    revision,
     types,
     update_widget,
 )
@@ -263,10 +267,36 @@ def api_index() -> dict:
             "GET /api/themes",
             "GET /api/tiles",
             "POST /api/reload",
+            "POST /api/widgets/{id}/post",
             "GET /api/widget-data/{id}",
             "GET /api/github",
         ],
     }
+
+
+def parse_if_match(value: str | None):
+    """If-Match carries the layout_revision the caller loaded, as 12 or "12".
+    No header means no check, so scripts and bots keep working."""
+    if value is None or not value.strip() or value.strip() == "*":
+        return None
+    raw = value.strip()
+    if raw.startswith("W/"):
+        raw = raw[2:]
+    raw = raw.strip('"')
+    if not raw.isdigit():
+        raise WidgetError("If-Match must be a layout revision number")
+    return int(raw)
+
+
+def import_layout(data: dict, if_match=None) -> dict:
+    allowed = {"widgets", "base_revision", "keep_managed"}
+    if "widgets" not in data or set(data) - allowed:
+        raise WidgetError('body must be {"widgets": [...]} with optional base_revision and keep_managed')
+    keep = data.get("keep_managed", False)
+    if not isinstance(keep, bool):
+        raise WidgetError("keep_managed must be true or false")
+    base = data.get("base_revision", if_match)
+    return {"widgets": replace_widgets(data["widgets"], base_revision=base, keep_managed=keep)}
 
 
 def list_tiles() -> dict:
@@ -366,6 +396,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             self._handle(method, path, head)
+        except StaleRevision as exc:
+            self._access(method, path, 409)
+            self._json(409, {"error": str(exc), "stale": True, "base_revision": exc.base, "layout_revision": exc.current})
         except WidgetError as exc:
             self._error(exc.status, str(exc))
         except ValueError as exc:
@@ -399,27 +432,24 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/github" and method == "GET":
             self._json(200, bulk_github(), head=head)
             return
+        base = parse_if_match(self.headers.get("If-Match")) if method in ("POST", "PUT", "PATCH", "DELETE") else None
         if path == "/api/widgets" and method == "GET":
-            self._json(200, {"widgets": list_widgets()}, head=head)
+            widgets, meta = list_widgets_with_revision()
+            self._json(200, {"widgets": widgets, **meta}, head=head, revision=meta)
             return
         if path == "/api/widgets" and method == "POST":
-            self._mutate(method, path, create_widget, created=True)
+            self._mutate(method, path, lambda data: create_widget(data, base_revision=base), created=True)
             return
         if path == "/api/widgets/order" and method == "PUT":
             def reorder(data):
                 if set(data) != {"ids"}:
                     raise WidgetError('body must be {"ids": [...]}')
-                return {"widgets": reorder_widgets(data["ids"])}
+                return {"widgets": reorder_widgets(data["ids"], base_revision=base)}
 
             self._mutate(method, path, reorder)
             return
         if path == "/api/widgets/import" and method == "PUT":
-            def import_layout(data):
-                if "widgets" not in data or set(data) - {"widgets"}:
-                    raise WidgetError('body must be {"widgets": [...]}')
-                return {"widgets": replace_widgets(data["widgets"])}
-
-            self._mutate(method, path, import_layout)
+            self._mutate(method, path, lambda data: import_layout(data, base))
             return
         if path.startswith("/api/widget-data/"):
             widget_id = path.removeprefix("/api/widget-data/")
@@ -431,20 +461,30 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, widget_live_data(get_widget(widget_id)), head=head)
             return
+        if path.startswith("/api/widgets/") and path.endswith("/post"):
+            widget_id = path.removeprefix("/api/widgets/").removesuffix("/post")
+            if "/" in widget_id or not ID_RE.match(widget_id):
+                self._error(404, "widget not found")
+                return
+            if method != "POST":
+                self._error(405, "method not allowed")
+                return
+            self._mutate(method, path, lambda data: post_line(widget_id, data))
+            return
         if path.startswith("/api/widgets/"):
             widget_id = path.removeprefix("/api/widgets/")
             if "/" in widget_id or not ID_RE.match(widget_id):
                 self._error(404, "widget not found")
                 return
             if method == "GET":
-                self._json(200, get_widget(widget_id), head=head)
+                self._json(200, get_widget(widget_id), head=head, revision=revision())
                 return
             if method == "PATCH":
-                self._mutate(method, path, lambda data: update_widget(widget_id, data))
+                self._mutate(method, path, lambda data: update_widget(widget_id, data, base_revision=base))
                 return
             if method == "DELETE":
-                delete_widget(widget_id)
-                self._empty(204)
+                delete_widget(widget_id, base_revision=base)
+                self._empty(204, revision=revision())
                 self._access(method, path, 204)
                 return
             self._error(405, "method not allowed")
@@ -482,11 +522,12 @@ class Handler(BaseHTTPRequestHandler):
             self._error(code, error)
             return
         payload = fn(data)
+        meta = revision() if path.startswith("/api/widgets") else None
         if created:
-            self._json(201, payload, location=f"/api/widgets/{payload['id']}")
+            self._json(201, payload, location=f"/api/widgets/{payload['id']}", revision=meta)
             self._access(method, path, 201)
             return
-        self._json(200, payload)
+        self._json(200, payload, revision=meta)
         self._access(method, path, 200)
 
     def _body(self) -> tuple[dict | None, str | None, int]:
@@ -508,7 +549,12 @@ class Handler(BaseHTTPRequestHandler):
             return None, "body must be a JSON object", 400
         return data, None, 0
 
-    def _json(self, code: int, payload, head: bool = False, location: str | None = None) -> None:
+    def _revision_headers(self, meta: dict | None) -> None:
+        if meta:
+            self.send_header("X-Deskboard-Revision", str(meta["revision"]))
+            self.send_header("X-Deskboard-Layout-Revision", str(meta["layout_revision"]))
+
+    def _json(self, code: int, payload, head: bool = False, location: str | None = None, revision: dict | None = None) -> None:
         body = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -517,13 +563,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if location:
             self.send_header("Location", location)
+        self._revision_headers(revision)
         self.end_headers()
         if not head:
             self.wfile.write(body)
 
-    def _empty(self, code: int) -> None:
+    def _empty(self, code: int, revision: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Length", "0")
+        self._revision_headers(revision)
         self.end_headers()
 
     def _error(self, code: int, message: str) -> None:

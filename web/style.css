@@ -1339,3 +1339,31 @@ html.cfg body {
   border-radius: 4px;
   padding: 2px 6px;
 }
+
+.cfg-badge.cfg-managed {
+  border-style: dashed;
+}
+
+.cfg-stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.cfg-stale[hidden] {
+  display: none;
+}
+
+.cfg-stale p {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.cfg-edit textarea:disabled,
+.cfg-edit input:disabled,
+.cfg-edit select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

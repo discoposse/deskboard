@@ -98,6 +98,16 @@ Run `scripts/reload.sh` and open `http://127.0.0.1:8730/?tilepreview=my_tile` to
 
 `scripts/reload.sh` tells a running server to rescan `tiles/`. It prints what loaded and what was skipped, and the board picks up the change within 5 seconds. The configurator has a **Reload tiles** button that does the same, and `POST /api/reload` is the API route behind both. A broken tile folder is skipped without touching the others. Restart the service only after changing server Python files (`sudo systemctl restart deskboard` on Ubuntu). See [docs/tiles.md](docs/tiles.md#reloading).
 
+## Let your bots post
+
+Mark a list tile with `"managed_by": "bots"` and any script or assistant can add a line to it.
+
+```bash
+scripts/post.sh botstatus Backup "Nightly backup finished"
+```
+
+The configurator keeps a managed tile's content read-only and refuses to apply over a newer layout. [How to get your bot to update your Deskboard](docs/bots.md#how-to-get-your-bot-to-update-your-deskboard) has the curl call and a prompt you can paste into any AI assistant.
+
 ## Install as a desk kiosk (Ubuntu)
 
 See [docs/install-ubuntu.md](docs/install-ubuntu.md). Short version:
@@ -126,6 +136,7 @@ Anything on the board is readable by every device that can reach the port. Keep 
 - [API reference](docs/api.md)
 - [Widget reference](docs/widgets.md)
 - [Tile catalog](docs/tiles.md)
+- [Bots and managed tiles](docs/bots.md), including how to get your bot to update your Deskboard
 - [Theme guide](docs/themes.md)
 - [Ubuntu kiosk install](docs/install-ubuntu.md)
 - [Security](docs/security.md)

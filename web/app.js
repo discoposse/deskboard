@@ -1626,6 +1626,7 @@ function sanitize(widget) {
     col_span: clampSpan(widget.col_span),
     row_span: clampSpan(widget.row_span),
   };
+  if (typeof widget.managed_by === "string" && /^[a-z][a-z0-9_-]{0,23}$/.test(widget.managed_by)) w.managed_by = widget.managed_by;
   const warnings = [];
   const errors = [];
   const singleField = (key, max, label, required) => {
@@ -1671,6 +1672,7 @@ function sanitize(widget) {
     if (cutCount) warnings.push(`${cutCount} item${cutCount > 1 ? "s" : ""} cut to ${LIMITS.item} characters`);
     if (!items.length) errors.push("A list needs at least one item");
     w.items = items;
+    if (Number.isInteger(widget.max_items) && widget.max_items >= 1 && widget.max_items <= LIMITS.items) w.max_items = widget.max_items;
   } else if (widget.type === "note") {
     singleField("title", LIMITS.title, "Title", false);
     blockField("text", LIMITS.text, "Text", true);
@@ -2273,8 +2275,33 @@ function startConfigurator() {
   importInput.style.display = "none";
   actions.append(applyBtn, undoBtn, discardBtn, reloadBtn, exportBtn, importBtn, reloadTilesBtn, importInput);
   prevSec.append(actions);
+  const staleBar = el("div", "cfg-stale");
+  staleBar.hidden = true;
+  const staleText = el("p", "cfg-warn bad", "");
+  const staleReload = el("button", "cfg-btn primary", "Reload from board");
+  const staleKeep = el("button", "cfg-btn", "Keep editing");
+  staleBar.append(staleText, staleReload, staleKeep);
+  prevSec.append(staleBar);
   const log = el("pre", "cfg-log", "Loading the board…");
   prevSec.append(log);
+  function showStale(info) {
+    S.staleShown = true;
+    staleText.textContent = `The board is at revision ${info.layout_revision}. You loaded revision ${info.base_revision}. Reloading drops your unsaved edits.`;
+    staleBar.hidden = false;
+  }
+  function hideStale() {
+    S.staleShown = false;
+    staleBar.hidden = true;
+  }
+  staleReload.addEventListener("click", () =>
+    load()
+      .then(() => say("Loaded the current board. Make your edits again and Apply."))
+      .catch((err) => say(String(err.message || err))),
+  );
+  staleKeep.addEventListener("click", () => {
+    S.staleShown = false;
+    staleBar.hidden = true;
+  });
   left.append(prevSec);
 
   const themeSec = el("section", "cfg-section");
@@ -2569,6 +2596,11 @@ function startConfigurator() {
     const top = el("div", "cfg-card-top");
     top.append(el("span", "cfg-grip", fixed ? "·" : "⠿"));
     top.append(el("span", "cfg-badge", entry.w.type));
+    if (entry.w.managed_by) {
+      const owned = el("span", "cfg-badge cfg-managed", entry.w.managed_by);
+      owned.title = `Filled by ${entry.w.managed_by}. Content is read-only here.`;
+      top.append(owned);
+    }
     top.append(el("span", "cfg-card-title", labelOf(entry) + (entry.w.enabled === false ? " (hidden)" : "")));
     if (!entry.deleted) {
       const edit = el("button", "cfg-btn", entry.open ? "Done" : "Edit");
@@ -2783,6 +2815,7 @@ function startConfigurator() {
       return label;
     };
 
+    const contentStart = box.childNodes.length;
     if (w.type === "list") {
       box.append(field(`Title (up to ${LIMITS.title})`, input("title", LIMITS.title)));
       box.append(field(`Items, one per line (up to ${LIMITS.items})`, input("items", 0, true)));
@@ -2864,6 +2897,21 @@ function startConfigurator() {
       box.append(field("Caption", input("caption", LIMITS.caption)));
     }
 
+    if (w.managed_by) {
+      // A bot or sync job owns this tile's content. Layout stays editable.
+      const added = Array.from(box.childNodes).slice(contentStart);
+      for (const node of added) {
+        for (const ctl of node.querySelectorAll ? node.querySelectorAll("input, textarea, select") : []) {
+          ctl.disabled = true;
+          ctl.readOnly = true;
+        }
+        if (node.matches && node.matches("input, textarea, select")) node.disabled = true;
+      }
+      const note = el("p", "cfg-warn cfg-managed-note", `Filled by ${w.managed_by}. Content is read-only here. Size, order, and Show on board still apply.`);
+      note.style.color = "var(--faint)";
+      box.insertBefore(note, box.childNodes[contentStart] || null);
+    }
+
     if (w.type !== "stats") box.append(spanButtons(entry, onChange));
 
     const row = el("div", "cfg-row");
@@ -2880,7 +2928,7 @@ function startConfigurator() {
     show.style.gap = "6px";
     show.prepend(cb);
     row.append(show);
-    if (!entry.origId && (w.type === "list" || w.type === "note")) {
+    if (!entry.origId && !w.managed_by && (w.type === "list" || w.type === "note")) {
       const sw = el("button", "cfg-btn", w.type === "list" ? "Make it a note" : "Make it a list");
       sw.addEventListener("click", () => {
         pushUndo();
@@ -2993,6 +3041,10 @@ function startConfigurator() {
               oneLine(e.w.title)) ||
             (type === "metric" && oneLine(e.w.label).toLowerCase() === oneLine(parsed.widget.label).toLowerCase())),
       );
+      if (match && match.w.managed_by && !parsed.group) {
+        match.notes = (match.notes || []).concat(`Skipped pasted content. ${match.w.managed_by} fills this tile.`);
+        continue;
+      }
       if (match && !parsed.group) {
         pushUndo();
         for (const key of EDITABLE[type] || []) if (key in parsed.widget) match.w[key] = parsed.widget[key];
@@ -3130,7 +3182,12 @@ function startConfigurator() {
     } catch (_err) {
       data = null;
     }
-    if (!res.ok) throw new Error(`${method} ${path}: ${(data && data.error) || res.status}`);
+    if (!res.ok) {
+      const err = new Error(`${method} ${path}: ${(data && data.error) || res.status}`);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
     return data;
   }
 
@@ -3149,6 +3206,8 @@ function startConfigurator() {
       api("GET", "/api/themes"),
     ]);
     S.server = Array.isArray(w.widgets) ? w.widgets : [];
+    S.layoutRevision = Number.isInteger(w.layout_revision) ? w.layout_revision : null;
+    hideStale();
     S.config = c || {};
     S.status = s;
     S.themes = Array.isArray(t.themes) ? t.themes : [];
@@ -3170,6 +3229,7 @@ function startConfigurator() {
     if (probs.length) return;
     S.busy = true;
     applyBtn.disabled = true;
+    hideStale();
     const lines = [];
     const step = (t) => {
       lines.push(t);
@@ -3180,14 +3240,28 @@ function startConfigurator() {
         const clean = computed(e).clean;
         return { ...clean, order: i * 10 };
       });
-      await api("PUT", "/api/widgets/import", { widgets });
+      const body = { widgets, keep_managed: true };
+      if (S.layoutRevision != null) body.base_revision = S.layoutRevision;
+      await api("PUT", "/api/widgets/import", body);
       step(`Replaced board with ${widgets.length} tile${widgets.length === 1 ? "" : "s"}.`);
+      if (widgets.some((x) => x.managed_by)) step("Managed tiles kept the content their bots posted. Only their layout changed.");
       step("Done. The board picks this up within 5 seconds.");
     } catch (err) {
+      if (err.status === 409 && err.data && err.data.stale) {
+        // Someone else changed the layout. Keep the local edits and ask.
+        step("Not applied. The board changed after you loaded it, from another browser, a script, or the API.");
+        step("Your edits are still here. Reload from board to start from the new layout, or Export JSON first to keep a copy.");
+        showStale(err.data);
+        S.busy = false;
+        applyBtn.disabled = false;
+        return;
+      }
       step(`Stopped: ${err.message || err}`);
       step("Reloaded what the board has now.");
     } finally {
       S.busy = false;
+      applyBtn.disabled = false;
+      if (S.staleShown) return;
       const keep = lines.join("\n");
       try {
         await load();

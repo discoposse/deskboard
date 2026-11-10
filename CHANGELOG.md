@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Managed tiles. An optional `managed_by` on any widget marks it as filled by a bot. The configurator shows its content read-only and still edits its size, order, and visibility. Apply sends `keep_managed`, so it never writes over a bot's content.
+- Layout revisions. `GET /api/widgets` returns `revision` and `layout_revision`, also as headers. `If-Match` or `base_revision` makes a write conditional, and a stale write gets `409`. The configurator shows a notice with **Reload from board** instead of overwriting. Writes without a revision work as before.
+- `POST /api/widgets/{id}/post` adds a timestamped line to a list tile, keeps the newest `max_items` (default 6), and never creates a tile. `scripts/post.sh` wraps it.
+- `docs/bots.md`, including how to get your bot to update your Deskboard.
+
 - Tile catalog. Each tile type outside the built-in set is a folder under `tiles/` with `tile.json`, `render.js`, an optional `tile.css`, and `README.md`. The server discovers folders at startup and validates widget fields against `tile.json`.
 - The metric widget now lives in `tiles/metric/` as the reference tile. Its API and look are unchanged.
 - `tiles/community/` for contributed tiles, off until listed in the new `enabled_community_tiles` config key (file only, not editable through `PATCH /api/config`). Includes a sample `quote` tile.

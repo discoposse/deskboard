@@ -10,7 +10,7 @@ Widget cap defaults to 16 and is configurable as `max_widgets`. Singletons: one 
 | `note` | Short prose. `title` optional, `text` required (up to 280 chars). |
 | `markdown` | Longer note with a small safe markdown subset. `text` up to 1200 chars. |
 | `metric` | One number. `label`, `value`, optional `hint` and `trend`. Lives in `tiles/metric/` as the reference catalog tile. |
-| `list` | 1 to 8 short lines. |
+| `list` | 1 to 8 short lines. Optional `max_items` (1 to 8) sets how many lines a bot post keeps, default 6. |
 | `weather` | Open-Meteo. `latitude`, `longitude`, optional `label`, `units` `metric` or `imperial`. |
 | `countdown` | Time to an ISO `target`. Optional `title` and `label`. |
 | `calendar` | ICS feed URL. `limit` 1 to 12. |
