@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import tiles
 from deskboard_config import ROOT, load_config
 
 PATH = Path(os.environ["DESKBOARD_WIDGETS"]) if os.environ.get("DESKBOARD_WIDGETS") else ROOT / "widgets.json"
@@ -25,13 +26,14 @@ DEFAULT_MAX_WIDGETS = 16
 STAT_FIELDS = ("temp", "load", "free", "up")
 SPAN_VALUES = (1, 2)
 
-TYPES = (
+# Widget types handled in this file. Tile folders under tiles/ add more
+# (see tiles.py). metric lives in tiles/metric as the reference tile.
+BUILTIN_TYPES = (
     "clock",
     "worldclocks",
     "stats",
     "note",
     "markdown",
-    "metric",
     "list",
     "weather",
     "countdown",
@@ -51,7 +53,6 @@ TYPE_FIELDS = {
     "stats": {"fields"},
     "note": {"title", "text"},
     "markdown": {"title", "text"},
-    "metric": {"label", "value", "hint", "trend"},
     "list": {"title", "items"},
     "weather": {"latitude", "longitude", "label", "units"},
     "countdown": {"title", "target", "label"},
@@ -114,10 +115,51 @@ DEFAULT_WIDGETS = [
 ]
 
 
+# Where catalog types sit in GET /api and error messages, so the list reads
+# the same as it did before metric moved into tiles/.
+TYPE_ORDER = BUILTIN_TYPES[:5] + ("metric",) + BUILTIN_TYPES[5:]
+
+_catalog: tiles.Catalog | None = None
+
+
 class WidgetError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def catalog() -> tiles.Catalog:
+    """Tile catalog, read once. serve.py loads it at startup."""
+    global _catalog
+    if _catalog is None:
+        reload_catalog()
+    return _catalog
+
+
+def reload_catalog() -> tiles.Catalog:
+    global _catalog
+    enabled = load_config().get("enabled_community_tiles") or []
+    _catalog = tiles.discover(enabled_community=enabled, reserved=BUILTIN_TYPES)
+    return _catalog
+
+
+def types() -> tuple:
+    extra = catalog().ids()
+    ordered = [t for t in TYPE_ORDER if t in BUILTIN_TYPES or t in extra]
+    ordered.extend(t for t in extra if t not in ordered)
+    return tuple(ordered)
+
+
+def _fields_for(widget_type: str) -> set:
+    tile = catalog().get(widget_type)
+    if tile is not None:
+        return set(tile.fields)
+    return TYPE_FIELDS[widget_type]
+
+
+def _require_type(widget_type) -> None:
+    if widget_type not in BUILTIN_TYPES and catalog().get(widget_type) is None:
+        raise WidgetError("type must be one of: " + ", ".join(types()))
 
 
 def max_widgets() -> int:
@@ -146,9 +188,8 @@ def create_widget(data: dict) -> dict:
     if not isinstance(data, dict):
         raise WidgetError("body must be an object")
     widget_type = data.get("type")
-    if widget_type not in TYPES:
-        raise WidgetError("type must be one of: " + ", ".join(TYPES))
-    _reject_unknown(data, TYPE_FIELDS[widget_type] | COMMON_FIELDS)
+    _require_type(widget_type)
+    _reject_unknown(data, _fields_for(widget_type) | COMMON_FIELDS)
 
     def run():
         widgets, _dirty = _read()
@@ -179,7 +220,7 @@ def update_widget(widget_id: str, data: dict) -> dict:
         current = next((item for item in widgets if item["id"] == widget_id), None)
         if current is None:
             raise WidgetError("widget not found", 404)
-        _reject_unknown(data, TYPE_FIELDS[current["type"]] | {"enabled", "order", "col_span", "row_span"})
+        _reject_unknown(data, _fields_for(current["type"]) | {"enabled", "order", "col_span", "row_span"})
         order = current["order"] if "order" not in data else _require_order(data["order"])
         widget = _build(current["type"], data, widget_id, order, previous=current)
         widgets = [widget if item["id"] == widget_id else item for item in widgets]
@@ -236,9 +277,8 @@ def replace_widgets(docs: list) -> list[dict]:
             if not isinstance(item, dict):
                 raise WidgetError("each widget must be an object")
             widget_type = item.get("type")
-            if widget_type not in TYPES:
-                raise WidgetError("type must be one of: " + ", ".join(TYPES))
-            _reject_unknown(item, TYPE_FIELDS[widget_type] | COMMON_FIELDS)
+            _require_type(widget_type)
+            _reject_unknown(item, _fields_for(widget_type) | COMMON_FIELDS)
             widget_id = item.get("id")
             if not isinstance(widget_id, str) or widget_id in RESERVED_IDS or not ID_RE.match(widget_id):
                 raise WidgetError("id must be a short lowercase name")
@@ -285,11 +325,11 @@ def _require_order(value) -> int:
     return value
 
 
-def _span(data: dict, previous: dict | None, field: str) -> int:
+def _span(data: dict, previous: dict | None, field: str, default: int = 1) -> int:
     if field not in data:
         if previous is None:
-            return 1
-        return int(previous.get(field, 1))
+            return default
+        return int(previous.get(field, default))
     value = data[field]
     if isinstance(value, bool) or not isinstance(value, int) or value not in SPAN_VALUES:
         raise WidgetError(f"{field} must be 1 or 2")
@@ -298,21 +338,28 @@ def _span(data: dict, previous: dict | None, field: str) -> int:
 
 def _build(widget_type: str, data: dict, widget_id: str, order: int, previous: dict | None) -> dict:
     enabled = _enabled(data, previous)
+    tile = catalog().get(widget_type)
+    spec = tile.spec if tile is not None else {}
     widget = {
         "id": widget_id,
         "type": widget_type,
         "enabled": enabled,
         "order": order,
-        "col_span": _span(data, previous, "col_span"),
-        "row_span": _span(data, previous, "row_span"),
+        "col_span": _span(data, previous, "col_span", spec.get("col_span", 1)),
+        "row_span": _span(data, previous, "row_span", spec.get("row_span", 1)),
     }
+    if tile is not None:
+        try:
+            widget.update(tiles.build_fields(spec, data, previous))
+        except tiles.TileError as exc:
+            raise WidgetError(str(exc)) from exc
+        return _present(widget)
     builders = {
         "clock": _build_clock,
         "worldclocks": _build_worldclocks,
         "stats": _build_stats,
         "note": _build_note,
         "markdown": _build_markdown,
-        "metric": _build_metric,
         "list": _build_list,
         "weather": _build_weather,
         "countdown": _build_countdown,
@@ -361,13 +408,6 @@ def _build_note(widget: dict, data: dict, previous: dict | None) -> None:
 def _build_markdown(widget: dict, data: dict, previous: dict | None) -> None:
     widget["title"] = _optional_text(data, previous, "title", 48)
     widget["text"] = _required_text(data, previous, "text", 1200, newlines=True, max_lines=40)
-
-
-def _build_metric(widget: dict, data: dict, previous: dict | None) -> None:
-    widget["label"] = _required_text(data, previous, "label", 24, newlines=False)
-    widget["value"] = _required_text(data, previous, "value", 24, newlines=False)
-    widget["hint"] = _optional_text(data, previous, "hint", 48)
-    widget["trend"] = _optional_text(data, previous, "trend", 24)
 
 
 def _build_list(widget: dict, data: dict, previous: dict | None) -> None:
@@ -714,6 +754,10 @@ def _sort_key(widget: dict) -> tuple:
 
 
 def _present(widget: dict) -> dict:
+    tile = catalog().get(widget.get("type"))
+    if tile is not None:
+        keys = ("id", "type", "enabled", "order", "col_span", "row_span") + tuple(tile.fields)
+        return {key: widget[key] for key in keys if key in widget}
     return {key: widget[key] for key in OUTPUT_KEYS if key in widget}
 
 
@@ -746,10 +790,13 @@ def _read() -> tuple[list[dict], bool]:
             raise WidgetError("widgets.json has an invalid widget", 500) from exc
         if not isinstance(widget_id, str) or widget_id in seen or not ID_RE.match(widget_id):
             raise WidgetError("widgets.json has an invalid widget id", 500)
-        if widget_type not in TYPES:
+        if widget_type in catalog().disabled:
+            # A community tile that is switched off. Leave it out of the board.
+            continue
+        if widget_type not in BUILTIN_TYPES and catalog().get(widget_type) is None:
             raise WidgetError("widgets.json has an invalid widget", 500)
         seen.add(widget_id)
-        allowed = TYPE_FIELDS[widget_type] | COMMON_FIELDS
+        allowed = _fields_for(widget_type) | COMMON_FIELDS
         kept = {key: item[key] for key in allowed if key in item}
         try:
             widgets.append(_build(widget_type, kept, widget_id, _require_order(order), previous=None))

@@ -9,7 +9,7 @@ Widget cap defaults to 16 and is configurable as `max_widgets`. Singletons: one 
 | `stats` | Footer sensors. `fields`: subset of `temp`, `load`, `free`, `up`. |
 | `note` | Short prose. `title` optional, `text` required (up to 280 chars). |
 | `markdown` | Longer note with a small safe markdown subset. `text` up to 1200 chars. |
-| `metric` | One number. `label`, `value`, optional `hint` and `trend`. |
+| `metric` | One number. `label`, `value`, optional `hint` and `trend`. Lives in `tiles/metric/` as the reference catalog tile. |
 | `list` | 1 to 8 short lines. |
 | `weather` | Open-Meteo. `latitude`, `longitude`, optional `label`, `units` `metric` or `imperial`. |
 | `countdown` | Time to an ISO `target`. Optional `title` and `label`. |
@@ -21,6 +21,8 @@ Widget cap defaults to 16 and is configurable as `max_widgets`. Singletons: one 
 | `timer` | `minutes` 1 to 180. `mode`: `pomodoro` or `countdown`. |
 | `status` | `targets`: `[{label, url}]` pinged server-side. |
 | `theme_card` | Preset image from the active theme. `image` id, optional `caption`. |
+
+More tile types come from folders under `tiles/`. `GET /api/tiles` lists them and [tiles.md](tiles.md) covers how to add one.
 
 Spans: set `col_span` and `row_span` to `1` or `2` so a tile covers more grid cells.
 

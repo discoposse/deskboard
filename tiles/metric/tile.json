@@ -1,0 +1,20 @@
+{
+  "id": "metric",
+  "name": "Metric",
+  "description": "One big value with a label, an optional trend, and a hint.",
+  "col_span": 1,
+  "row_span": 1,
+  "fit": "metric",
+  "fields": {
+    "label": { "type": "line", "label": "Label", "required": true, "max": 24 },
+    "value": { "type": "line", "label": "Value", "required": true, "max": 24 },
+    "hint": { "type": "line", "label": "Hint", "max": 48, "default": "" },
+    "trend": { "type": "line", "label": "Trend", "max": 24, "default": "" }
+  },
+  "example": {
+    "label": "Focus",
+    "value": "3",
+    "hint": "open",
+    "trend": "+1"
+  }
+}

@@ -14,6 +14,7 @@ GET    /api/status
 GET    /api/config
 PATCH  /api/config
 GET    /api/themes
+GET    /api/tiles
 GET    /api/widgets
 POST   /api/widgets
 GET    /api/widgets/{id}
@@ -29,9 +30,9 @@ GET    /api/github
 
 ## Config
 
-`GET /api/config` returns public settings: mark, timezone, port, night dim window, theme, max_widgets, embed_allowlist, bind_tailscale, extra_bind, grid_cols, grid_rows.
+`GET /api/config` returns the public settings mark, timezone, port, night dim window, theme, max_widgets, embed_allowlist, bind_tailscale, extra_bind, grid_cols, grid_rows, enabled_community_tiles.
 
-`PATCH /api/config` accepts a subset of those keys. Unknown keys are rejected. `extra_bind` may not include `0.0.0.0` or `::`. The clock timezone is display-only. The OS timezone is never changed.
+`PATCH /api/config` accepts a subset of those keys. Unknown keys are rejected. `port` and `enabled_community_tiles` are read from `config.json` only. `extra_bind` may not include `0.0.0.0` or `::`. The clock timezone is display-only. The OS timezone is never changed.
 
 ## Widgets
 
@@ -42,6 +43,10 @@ Unknown fields are rejected. Send only the fields you mean to change on `PATCH`.
 `PUT /api/widgets/order` body: `{"ids":["clock","stats",...]}` with every id once.
 
 `PUT /api/widgets/import` body: `{"widgets":[...]}` replaces the whole layout atomically.
+
+## Tiles
+
+`GET /api/tiles` lists every tile folder the server found at startup with its fields, example values, and whether it is enabled. Catalog tiles use the widget routes above and count toward the widget cap. See [tiles.md](tiles.md).
 
 ## Live data
 

@@ -11,5 +11,6 @@
   "bind_tailscale": false,
   "extra_bind": [],
   "grid_cols": 4,
-  "grid_rows": 3
+  "grid_rows": 3,
+  "enabled_community_tiles": []
 }

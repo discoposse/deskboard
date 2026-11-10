@@ -29,6 +29,7 @@ BRIEF.md
 /tmp/
 shots/overflow-*.txt
 shots/board-*-*.png
+shots/tile-*.png
 
 # Keep curated README shots
 !shots/README.md

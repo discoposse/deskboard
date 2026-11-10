@@ -1,0 +1,16 @@
+{
+  "id": "quote",
+  "name": "Quote",
+  "description": "A short quote with an optional author line.",
+  "col_span": 1,
+  "row_span": 1,
+  "fit": "text",
+  "fields": {
+    "quote": { "type": "text", "label": "Quote", "required": true, "max": 200, "max_lines": 4 },
+    "author": { "type": "line", "label": "Author", "max": 48, "default": "" }
+  },
+  "example": {
+    "quote": "Make it work, make it right, make it fast.",
+    "author": "Kent Beck"
+  }
+}

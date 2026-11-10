@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Headless overflow + screenshot pass across fixtures, themes, and sizes.
+# Headless overflow + screenshot pass across fixtures, themes, and sizes,
+# then every tile in tiles/ (community tiles included) on its preview page.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -33,14 +34,16 @@ export DESKBOARD_WIDGETS="$WORKDIR/widgets.json"
 # Keep the real machine name out of screenshots.
 export DESKBOARD_HOSTNAME="${DESKBOARD_HOSTNAME:-deskboard}"
 cp "$ROOT/config.example.json" "$DESKBOARD_CONFIG"
-# Force a free high port via config.
-"$PYTHON" - <<'PY' "$DESKBOARD_CONFIG"
+# Force a free high port, and switch on every community tile so it gets checked.
+"$PYTHON" - <<'PY' "$DESKBOARD_CONFIG" "$ROOT/tiles/community"
 import json, sys
-path = sys.argv[1]
+from pathlib import Path
+path, community = sys.argv[1], Path(sys.argv[2])
 data = json.load(open(path))
 data["port"] = 18730
 data["bind_tailscale"] = False
 data["extra_bind"] = []
+data["enabled_community_tiles"] = sorted(p.name for p in community.iterdir() if p.is_dir()) if community.is_dir() else []
 json.dump(data, open(path, "w"), indent=2)
 PY
 
@@ -88,6 +91,41 @@ except Exception as e:
     print("FAIL no report", e, raw[:200])
 ' "$w" "$h")"
       printf '%-8s %-12s %-10s %s\n' "$fx" "$theme" "$size" "$line" | tee -a "$report"
+      case "$line" in
+        PASS*) pass=$((pass + 1)) ;;
+        *) fail=$((fail + 1)); echo "  $raw" | head -c 1200; echo ;;
+      esac
+    done
+  done
+done
+
+# Tile catalog: each tile at all four spans on /?tilepreview=<id>.
+TILE_IDS="$(curl -sf "http://127.0.0.1:18730/api/tiles" | "$PYTHON" -c '
+import json, sys
+print(" ".join(t["id"] for t in json.load(sys.stdin)["tiles"] if t.get("enabled")))
+')"
+if ! "$PYTHON" "$ROOT/tiles.py" check | tee -a "$report"; then
+  fail=$((fail + 1))
+fi
+for tile in $TILE_IDS; do
+  for theme in $THEMES; do
+    for size in $SIZES; do
+      w=${size%x*}
+      h=${size#*x}
+      shot="$SHOTS/tile-$tile-$theme-$size.png"
+      raw="$("$NODE" "$CDP" "http://127.0.0.1:18730/?tilepreview=$tile&theme=$theme&check" "$w" "$h" "$shot" 2800 'document.documentElement.getAttribute("data-overflow")' || true)"
+      line="$(printf '%s\n' "$raw" | "$PYTHON" -c '
+import json, sys
+w, h = int(sys.argv[1]), int(sys.argv[2])
+raw = sys.stdin.read().strip()
+try:
+    r = json.loads(raw)
+    ok = bool(r.get("ok")) and r.get("viewport") == [w, h] and int(r.get("badCount", 99)) == 0 and r.get("tiles") == 4 and r.get("tileErrors") == 0
+    print(("PASS" if ok else "FAIL"), "tiles=%s bad=%s ellipsized=%s errors=%s" % (r.get("tiles"), r.get("badCount"), r.get("ellipsized"), r.get("tileErrors")))
+except Exception as e:
+    print("FAIL no report", e, raw[:200])
+' "$w" "$h")"
+      printf '%-8s %-12s %-10s %s\n' "tile:$tile" "$theme" "$size" "$line" | tee -a "$report"
       case "$line" in
         PASS*) pass=$((pass + 1)) ;;
         *) fail=$((fail + 1)); echo "  $raw" | head -c 1200; echo ;;

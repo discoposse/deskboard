@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,7 +28,10 @@ PUBLIC_KEYS = (
     "extra_bind",
     "grid_cols",
     "grid_rows",
+    "enabled_community_tiles",
 )
+# enabled_community_tiles is read from config.json only. Community tiles run
+# code in the board page, so turning one on takes an edit on the box and a restart.
 EDITABLE_KEYS = (
     "mark",
     "timezone",
@@ -57,6 +61,7 @@ DEFAULTS = {
     "extra_bind": [],
     "grid_cols": 4,
     "grid_rows": 3,
+    "enabled_community_tiles": [],
 }
 
 
@@ -64,6 +69,7 @@ def load_config() -> dict:
     cfg = dict(DEFAULTS)
     cfg["embed_allowlist"] = list(DEFAULTS["embed_allowlist"])
     cfg["extra_bind"] = list(DEFAULTS["extra_bind"])
+    cfg["enabled_community_tiles"] = []
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -121,6 +127,12 @@ def load_config() -> dict:
         value = data.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 8:
             cfg[key] = value
+
+    community = data.get("enabled_community_tiles")
+    if isinstance(community, list):
+        cfg["enabled_community_tiles"] = [
+            item for item in community if isinstance(item, str) and re.match(r"^[a-z][a-z0-9_]{1,31}$", item)
+        ][:32]
 
     return cfg
 

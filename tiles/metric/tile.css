@@ -1,0 +1,7 @@
+/* Center the value block. Label, value, trend, and hint text styles stay in
+   web/style.css because other tiles reuse the hint style. */
+.board .tile.tile-metric .tile-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}

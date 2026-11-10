@@ -84,6 +84,16 @@ curl -s http://127.0.0.1:8730/api/widgets/import \
   --data-binary @examples/demo-board.json
 ```
 
+## Build your own tile
+
+Each tile type outside the built-in set is one folder under `tiles/` with a `tile.json`, a `render.js`, an optional `tile.css`, and a `README.md`. The server finds the folders at startup, so adding a tile means adding a folder.
+
+```bash
+scripts/new_tile.sh my_tile
+```
+
+Restart the server and open `http://127.0.0.1:8730/?tilepreview=my_tile` to see it at every span. Contributed tiles go under `tiles/community/` and stay off until you list them in `enabled_community_tiles`. The full guide is [docs/tiles.md](docs/tiles.md), and the checklist is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Install as a desk kiosk (Ubuntu)
 
 See [docs/install-ubuntu.md](docs/install-ubuntu.md). Short version:
@@ -99,6 +109,7 @@ That installs Cage + WebKitGTK, writes systemd units, and starts the board on th
 - Tile grid that stays inside the viewport from 1024x600 up to 4K, including portrait
 - Drag-and-drop configurator: drop files, reorder tiles, resize spans, live preview
 - Themes (warm dark default, plus Tokyo Night, Catppuccin, Gruvbox, Nord, Rose Pine, Tiling, Paper)
+- Tile catalog under `tiles/` with a scaffold script, a preview page, and off-by-default community tiles
 - Widgets for notes, lists, metrics, markdown, weather, countdown, ICS calendar, GitHub stars, embeds, RSS, images, timers, URL status, world clocks, and theme art cards
 - Stdlib Python server. No CORS. Loopback by default. Optional Tailscale bind
 
@@ -110,6 +121,7 @@ Anything on the board is readable by every device that can reach the port. Keep 
 
 - [API reference](docs/api.md)
 - [Widget reference](docs/widgets.md)
+- [Tile catalog](docs/tiles.md)
 - [Theme guide](docs/themes.md)
 - [Ubuntu kiosk install](docs/install-ubuntu.md)
 - [Security](docs/security.md)

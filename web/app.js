@@ -1,6 +1,7 @@
-/* Deskboard frontend. One file, two modes:
-   /          kiosk board (tile grid that always fits the screen)
-   /?config   drag-and-drop configurator that edits the board through its API
+/* Deskboard frontend. One file, three modes:
+   /                   kiosk board (tile grid that always fits the screen)
+   /?config            drag-and-drop configurator that edits the board through its API
+   /?tilepreview=<id>  one catalog tile at every span, for building and checking tiles
    Plain DOM, no frameworks, no external network (except user-configured embeds). */
 "use strict";
 
@@ -28,6 +29,8 @@ const ALL_TYPES = [
   "theme_card",
 ];
 const SINGLETONS = new Set(["clock", "stats", "worldclocks"]);
+// Types drawn by this file. Everything else comes from the tile catalog (tiles/).
+const BUILTIN_TYPES = new Set(ALL_TYPES.filter((t) => t !== "metric"));
 const MARKET_HOURS = {
   "America/New_York": { open: [9, 30], close: [16, 0], days: [1, 2, 3, 4, 5] },
   "Europe/London": { open: [8, 0], close: [16, 30], days: [1, 2, 3, 4, 5] },
@@ -43,6 +46,118 @@ function el(tag, className, text) {
 
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
+}
+
+/* ---------- tile catalog ---------- */
+
+// Metadata from GET /api/tiles for enabled tiles, and the render functions
+// their render.js files register.
+const TILE_CATALOG = new Map();
+const TILE_RENDERERS = new Map();
+const TILE_TAGS = new Set(["div", "p", "span", "strong", "em", "b", "i", "small", "ul", "ol", "li", "br", "blockquote", "figure", "figcaption"]);
+const TILE_CLASS = /^[a-z][a-z0-9_-]{0,63}$/;
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const TILE_HELPERS = Object.freeze({ escape: escapeHtml });
+
+window.DeskboardTiles = Object.freeze({
+  register(id, def) {
+    if (typeof id !== "string" || !TILE_CATALOG.has(id) || TILE_RENDERERS.has(id)) return;
+    if (!def || typeof def.render !== "function") return;
+    TILE_RENDERERS.set(id, def.render);
+  },
+});
+
+// Rebuild tile markup from a short list of text tags. Every attribute except
+// class is dropped, and anything else (scripts, images, links, styles) is removed.
+function safeFragment(html) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = String(html == null ? "" : html);
+  const out = document.createDocumentFragment();
+  const copy = (src, dst) => {
+    for (const node of src.childNodes) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        dst.append(document.createTextNode(node.nodeValue));
+      } else if (node.nodeType === Node.ELEMENT_NODE && TILE_TAGS.has(node.localName)) {
+        const next = document.createElement(node.localName);
+        const classes = String(node.getAttribute("class") || "")
+          .split(/\s+/)
+          .filter((c) => TILE_CLASS.test(c));
+        if (classes.length) next.className = classes.join(" ");
+        copy(node, next);
+        dst.append(next);
+      }
+    }
+  };
+  copy(tpl.content, out);
+  return out;
+}
+
+function deepFreeze(value) {
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) deepFreeze(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function isCatalogType(type) {
+  return TILE_CATALOG.has(type);
+}
+
+function knownType(type) {
+  return BUILTIN_TYPES.has(type) || TILE_CATALOG.has(type);
+}
+
+function loadTileAssets(meta) {
+  const id = encodeURIComponent(meta.id);
+  const waits = [];
+  if (meta.has_css) {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `/tiles/${id}/tile.css`;
+    waits.push(new Promise((resolve) => (link.onload = link.onerror = resolve)));
+    document.head.append(link);
+  }
+  const script = document.createElement("script");
+  script.src = `/tiles/${id}/render.js`;
+  waits.push(new Promise((resolve) => (script.onload = script.onerror = resolve)));
+  document.head.append(script);
+  return Promise.all(waits);
+}
+
+let tileCatalogLoad = null;
+let tileCatalogAll = [];
+
+// Load the catalog once. A failed request is retried on the next call.
+function loadTileCatalog() {
+  if (!tileCatalogLoad) {
+    tileCatalogLoad = (async () => {
+      const res = await fetch("/api/tiles", { cache: "no-store" });
+      if (!res.ok) throw new Error(`GET /api/tiles: ${res.status}`);
+      const data = await res.json();
+      tileCatalogAll = Array.isArray(data.tiles) ? data.tiles : [];
+      const fresh = [];
+      for (const meta of tileCatalogAll) {
+        if (!meta || !meta.enabled || TILE_CATALOG.has(meta.id)) continue;
+        TILE_CATALOG.set(meta.id, deepFreeze(meta));
+        fresh.push(meta);
+      }
+      await Promise.all(fresh.map(loadTileAssets));
+    })().catch((err) => {
+      tileCatalogLoad = null;
+      throw err;
+    });
+  }
+  return tileCatalogLoad;
 }
 
 function zonedParts(date, timeZone) {
@@ -314,13 +429,6 @@ function mmss(totalSec) {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function trendClass(trend) {
-  const t = String(trend || "").toLowerCase();
-  if (t.includes("up") || t.startsWith("+")) return "up";
-  if (t.includes("down") || t.startsWith("-")) return "down";
-  return "";
 }
 
 class Board {
@@ -619,8 +727,6 @@ class Board {
         return this.renderList(widget);
       case "note":
         return this.renderNote(widget);
-      case "metric":
-        return this.renderMetric(widget);
       case "markdown":
         return this.renderMarkdown(widget);
       case "worldclocks":
@@ -646,8 +752,33 @@ class Board {
       case "theme_card":
         return this.renderThemeCard(widget);
       default:
-        return null;
+        return TILE_RENDERERS.has(widget.type) ? this.renderCatalogTile(widget) : null;
     }
+  }
+
+  // Tiles from tiles/<id>/. render.js gets a frozen copy of the tile's fields
+  // and returns markup, which goes through safeFragment before it is shown.
+  renderCatalogTile(widget) {
+    const meta = TILE_CATALOG.get(widget.type);
+    const render = TILE_RENDERERS.get(widget.type);
+    const tile = el("section", `tile tile-${widget.type}`);
+    tile.dataset.widgetId = widget.id || "";
+    tile.dataset.fit = meta.fit || "none";
+    const data = { col_span: clampSpan(widget.col_span), row_span: clampSpan(widget.row_span) };
+    for (const key of Object.keys(meta.fields || {})) {
+      if (key in widget) data[key] = JSON.parse(JSON.stringify(widget[key]));
+    }
+    const body = el("div", "tile-body");
+    try {
+      body.append(safeFragment(render(deepFreeze(data), TILE_HELPERS)));
+    } catch (err) {
+      tile.classList.add("tile-error");
+      clear(body);
+      body.append(el("p", "metric-hint", `${meta.name} could not render`));
+      console.error(`tile ${widget.type}`, err);
+    }
+    tile.append(body);
+    return tile;
   }
 
   renderList(widget) {
@@ -670,21 +801,6 @@ class Board {
     if (widget.title) tile.append(el("p", "eyebrow", widget.title));
     const body = el("div", "tile-body");
     body.append(el("p", "note-text", widget.text || ""));
-    tile.append(body);
-    return tile;
-  }
-
-  renderMetric(widget) {
-    const tile = el("section", "tile metric");
-    tile.dataset.widgetId = widget.id || "";
-    const body = el("div", "tile-body");
-    body.append(el("p", "metric-label", widget.label || ""));
-    body.append(el("p", "metric-value", widget.value || ""));
-    if (widget.trend) {
-      const trend = el("p", `metric-trend ${trendClass(widget.trend)}`.trim(), widget.trend);
-      body.append(trend);
-    }
-    if (widget.hint) body.append(el("p", "metric-hint", widget.hint));
     tile.append(body);
     return tile;
   }
@@ -965,7 +1081,8 @@ class Board {
       if (tile.classList.contains("list")) lists.push([tile, this.fitList(tile)]);
       else if (tile.classList.contains("note") && !tile.classList.contains("markdown")) this.fitNote(tile);
       else if (tile.classList.contains("markdown")) this.fitMarkdown(tile);
-      else if (tile.classList.contains("metric")) this.fitMetric(tile);
+      else if (tile.dataset.fit === "metric") this.fitMetric(tile);
+      else if (tile.dataset.fit === "text") this.fitText(tile);
       else if (tile.classList.contains("countdown") || tile.classList.contains("weather") || tile.classList.contains("timer")) {
         this.fitBigNumber(tile);
       }
@@ -1157,6 +1274,19 @@ class Board {
     value.style.fontSize = `${14 * u}px`;
   }
 
+  // Catalog tiles with "fit": "text" shrink the .fit-text element (or the body)
+  // until it fits. Size inner text in em so it scales along.
+  fitText(tile) {
+    const body = tile.querySelector(".tile-body");
+    if (!body) return;
+    const target = body.querySelector(".fit-text") || body;
+    const u = this.u || 1;
+    for (let s = 44; s >= 12; s -= 1) {
+      target.style.fontSize = `${s * u}px`;
+      if (body.scrollHeight <= body.clientHeight + 0.5 && body.scrollWidth <= body.clientWidth + 0.5) return;
+    }
+  }
+
   fitBigNumber(tile) {
     const body = tile.querySelector(".tile-body");
     const value = body.querySelector(".countdown-value, .weather-temp, .timer-display");
@@ -1239,8 +1369,10 @@ function overflowReport(root) {
   ).length;
   const more = Array.from(root.querySelectorAll("li.more")).map((n) => n.textContent);
   const hm = root.querySelector(".hm");
+  const tileErrors = root.querySelectorAll(".tile-error").length;
   return {
-    ok: bad.length === 0,
+    ok: bad.length === 0 && tileErrors === 0,
+    tileErrors,
     viewport: [vw, vh],
     tiles: root.querySelectorAll(".tile").length,
     bad: bad.slice(0, 20),
@@ -1262,6 +1394,7 @@ function startKiosk() {
   const bootedAt = Date.now();
   let widgets = [];
   let themeReady = false;
+  let tilesReady = false;
 
   const resize = () => {
     board.setScale(window.innerWidth, window.innerHeight);
@@ -1300,6 +1433,15 @@ function startKiosk() {
       const status = await statusResponse.json();
       const body = await widgetResponse.json();
       const config = configResponse.ok ? await configResponse.json() : {};
+      if (!tilesReady) {
+        try {
+          await loadTileCatalog();
+          tilesReady = true;
+          board.drawn = null;
+        } catch (_err) {
+          /* catalog tiles stay hidden until the next refresh */
+        }
+      }
       // applyConfig records the wanted theme id, so compare against the one painted before it.
       const paintedTheme = board.themeId;
       board.applyConfig({ ...status, ...config });
@@ -1365,7 +1507,6 @@ const EDITABLE = {
   note: ["title", "text", "col_span", "row_span"],
   markdown: ["title", "text", "col_span", "row_span"],
   list: ["title", "items", "col_span", "row_span"],
-  metric: ["label", "value", "hint", "trend", "col_span", "row_span"],
   weather: ["latitude", "longitude", "label", "units", "col_span", "row_span"],
   countdown: ["title", "target", "label", "col_span", "row_span"],
   calendar: ["title", "url", "limit", "col_span", "row_span"],
@@ -1422,7 +1563,6 @@ function blankWidget(type) {
     note: { type: "note", title: "Focus", text: "Ship it", col_span: 1, row_span: 1 },
     markdown: { type: "markdown", title: "Today", text: "**Focus**\n\n- Ship it\n- Review notes", col_span: 1, row_span: 1 },
     list: { type: "list", title: "Today", items: ["Ship it", "Review notes", "Stretch"], col_span: 1, row_span: 1 },
-    metric: { type: "metric", label: "Focus", value: "3", hint: "open", trend: "+1", col_span: 1, row_span: 1 },
     weather: { type: "weather", latitude: 40.71, longitude: -74.01, label: "City", units: "metric", col_span: 1, row_span: 1 },
     countdown: { type: "countdown", title: "Ship it", target: "2027-01-01T00:00:00Z", label: "Launch", col_span: 1, row_span: 1 },
     calendar: { type: "calendar", title: "Calendar", url: "https://example.com/calendar.ics", limit: 5, col_span: 1, row_span: 1 },
@@ -1440,7 +1580,19 @@ function blankWidget(type) {
     },
     theme_card: { type: "theme_card", image: "default", caption: "Theme art", col_span: 1, row_span: 1 },
   };
+  const meta = TILE_CATALOG.get(type);
+  if (meta) return JSON.parse(JSON.stringify({ type, ...meta.example, col_span: meta.col_span || 1, row_span: meta.row_span || 1 }));
   return JSON.parse(JSON.stringify(blanks[type] || { type }));
+}
+
+// Called once the catalog loads so the configurator knows each tile's fields.
+function registerCatalogEditing() {
+  for (const meta of TILE_CATALOG.values()) EDITABLE[meta.id] = Object.keys(meta.fields).concat("col_span", "row_span");
+}
+
+function catalogLimit(spec) {
+  if (spec.type === "text") return spec.max || 280;
+  return spec.max || 80;
 }
 
 function sanitize(widget) {
@@ -1502,11 +1654,31 @@ function sanitize(widget) {
   } else if (widget.type === "markdown") {
     singleField("title", LIMITS.title, "Title", false);
     blockField("text", LIMITS.markdown, "Text", true);
-  } else if (widget.type === "metric") {
-    singleField("label", LIMITS.label, "Label", true);
-    singleField("value", LIMITS.value, "Value", true);
-    singleField("hint", LIMITS.hint, "Hint", false);
-    singleField("trend", LIMITS.trend, "Trend", false);
+  } else if (isCatalogType(widget.type)) {
+    const meta = TILE_CATALOG.get(widget.type);
+    for (const [key, spec] of Object.entries(meta.fields)) {
+      const label = spec.label || key;
+      if (spec.type === "line") singleField(key, catalogLimit(spec), label, Boolean(spec.required));
+      else if (spec.type === "text") blockField(key, catalogLimit(spec), label, Boolean(spec.required));
+      else if (spec.type === "lines") {
+        const most = spec.max_items || 8;
+        let items = (Array.isArray(widget[key]) ? widget[key] : []).map(oneLine).filter(Boolean);
+        if (items.length > most) {
+          warnings.push(`${label} has ${items.length} lines, the tile takes ${most}`);
+          items = items.slice(0, most);
+        }
+        items = items.map((item) => cut(item, catalogLimit(spec)));
+        if (!items.length && spec.required) errors.push(`${label} is empty`);
+        w[key] = items;
+      } else if (spec.type === "integer") {
+        const n = Number(widget[key]);
+        w[key] = Number.isInteger(n) ? Math.max(spec.min, Math.min(spec.max, n)) : spec.default;
+      } else if (spec.type === "boolean") {
+        w[key] = widget[key] == null ? Boolean(spec.default) : Boolean(widget[key]);
+      } else if (spec.type === "choice") {
+        w[key] = spec.options.includes(widget[key]) ? widget[key] : spec.default || spec.options[0];
+      }
+    }
   } else if (widget.type === "stats") {
     const fields = (Array.isArray(widget.fields) ? widget.fields : []).filter((f) => STAT_FIELDS.includes(f));
     w.fields = Array.from(new Set(fields));
@@ -1579,7 +1751,11 @@ function sanitize(widget) {
     errors.push(`Unknown type ${widget.type}`);
   }
 
+  const catalogText = isCatalogType(widget.type)
+    ? Object.keys(TILE_CATALOG.get(widget.type).fields).flatMap((key) => (Array.isArray(w[key]) ? w[key] : [w[key]])).filter((v) => typeof v === "string")
+    : [];
   const blob = [w.title, w.text, w.label, w.value, w.hint, w.trend, w.caption, w.url, w.src, w.target]
+    .concat(catalogText)
     .concat(w.items || [])
     .concat(w.repos || [])
     .concat((w.targets || []).flatMap((t) => [t.label, t.url]))
@@ -1758,7 +1934,7 @@ function specFromObject(obj, name) {
     else if (obj.text != null) type = "note";
     else if (obj.label != null && obj.value != null) type = "metric";
   }
-  if (!EDITABLE[type]) return null;
+  if (!EDITABLE[type] || !knownType(type)) return null;
   const allowed = new Set(["id", "type", "enabled", "col_span", "row_span"].concat(EDITABLE[type]));
   const widget = { type };
   const dropped = [];
@@ -2140,11 +2316,18 @@ function startConfigurator() {
   const gallerySec = el("section", "cfg-section");
   gallerySec.append(el("h2", null, "Widget gallery"));
   const gallery = el("div", "cfg-gallery");
-  for (const type of ALL_TYPES) {
-    const b = el("button", null, type.replace(/_/g, " "));
-    b.addEventListener("click", () => addBlank(type));
-    gallery.append(b);
+  function renderGallery() {
+    clear(gallery);
+    const list = ALL_TYPES.filter(knownType).concat([...TILE_CATALOG.keys()].filter((t) => !ALL_TYPES.includes(t)));
+    for (const type of list) {
+      const meta = TILE_CATALOG.get(type);
+      const b = el("button", null, meta && !ALL_TYPES.includes(type) ? meta.name : type.replace(/_/g, " "));
+      if (meta) b.title = meta.description;
+      b.addEventListener("click", () => addBlank(type));
+      gallery.append(b);
+    }
   }
+  renderGallery();
   gallerySec.append(gallery);
   right.append(gallerySec);
 
@@ -2218,13 +2401,24 @@ function startConfigurator() {
     return list;
   }
 
+  // The field a card title comes from: title, label, or name. Without one the
+  // card shows the tile's name.
+  function catalogTitleKey(type) {
+    const fields = TILE_CATALOG.get(type).fields;
+    for (const key of ["title", "label", "name"]) if (fields[key] && fields[key].type === "line") return key;
+    return null;
+  }
+
   function labelOf(entry) {
     const w = entry.w;
     if (w.type === "clock") return "Clock";
     if (w.type === "stats") return "Stats";
     if (w.type === "worldclocks") return "World clocks";
-    if (w.type === "metric") return oneLine(w.label) || "Metric";
     if (w.type === "theme_card") return oneLine(w.caption) || "Theme card";
+    if (isCatalogType(w.type)) {
+      const key = catalogTitleKey(w.type);
+      return (key && oneLine(w[key])) || TILE_CATALOG.get(w.type).name;
+    }
     return oneLine(w.title) || oneLine(w.label) || w.type;
   }
 
@@ -2235,7 +2429,14 @@ function startConfigurator() {
     if (w.type === "worldclocks") return (w.cities || []).map((c) => c.label).join(" · ");
     if (w.type === "list") return `${(w.items || []).length} item${(w.items || []).length === 1 ? "" : "s"}`;
     if (w.type === "note" || w.type === "markdown") return w.text;
-    if (w.type === "metric") return `${w.value || ""}${w.trend ? " " + w.trend : ""}${w.hint ? "  " + w.hint : ""}`;
+    if (isCatalogType(w.type)) {
+      const titleKey = catalogTitleKey(w.type);
+      return Object.entries(TILE_CATALOG.get(w.type).fields)
+        .filter(([key, spec]) => key !== titleKey && (spec.type === "line" || spec.type === "text" || spec.type === "lines"))
+        .map(([key]) => (Array.isArray(w[key]) ? w[key].join(", ") : oneLine(w[key])))
+        .filter(Boolean)
+        .join(" ");
+    }
     if (w.type === "weather") return `${w.label || "Weather"} ${w.latitude}, ${w.longitude}`;
     if (w.type === "countdown") return `${w.target || ""}`;
     if (w.type === "github") return (w.repos || []).join(", ");
@@ -2481,16 +2682,19 @@ function startConfigurator() {
         snapped = true;
       }
     };
-    const input = (key, max, multiline) => {
+    const input = (key, max, multiline, kind) => {
       const node = el(multiline ? "textarea" : "input");
-      if (key === "items") node.value = (w.items || []).join("\n");
+      if (kind === "lines") node.value = (w[key] || []).join("\n");
+      else if (key === "items") node.value = (w.items || []).join("\n");
       else if (key === "repos") node.value = (w.repos || []).join("\n");
       else if (key === "cities") node.value = (w.cities || []).map((c) => `${c.label}|${c.zone}`).join("\n");
       else if (key === "targets") node.value = (w.targets || []).map((t) => `${t.label}|${t.url}`).join("\n");
       else node.value = w[key] == null ? "" : w[key];
       node.addEventListener("input", () => {
         snapOnce();
-        if (key === "items") w.items = node.value.split("\n");
+        if (kind === "lines") w[key] = node.value.split("\n");
+        else if (kind === "number") w[key] = Number(node.value);
+        else if (key === "items") w.items = node.value.split("\n");
         else if (key === "repos") w.repos = node.value.split("\n");
         else if (key === "cities")
           w.cities = node.value
@@ -2560,11 +2764,16 @@ function startConfigurator() {
     } else if (w.type === "note" || w.type === "markdown") {
       box.append(field(`Title (up to ${LIMITS.title})`, input("title", LIMITS.title)));
       box.append(field(`Text (up to ${w.type === "markdown" ? LIMITS.markdown : LIMITS.text})`, input("text", 0, true)));
-    } else if (w.type === "metric") {
-      box.append(field(`Label`, input("label", LIMITS.label)));
-      box.append(field(`Value`, input("value", LIMITS.value)));
-      box.append(field(`Trend`, input("trend", LIMITS.trend)));
-      box.append(field(`Hint`, input("hint", LIMITS.hint)));
+    } else if (isCatalogType(w.type)) {
+      for (const [key, spec] of Object.entries(TILE_CATALOG.get(w.type).fields)) {
+        const label = spec.label || key;
+        if (spec.type === "line") box.append(field(label, input(key, catalogLimit(spec))));
+        else if (spec.type === "text") box.append(field(`${label} (up to ${catalogLimit(spec)})`, input(key, 0, true)));
+        else if (spec.type === "lines") box.append(field(`${label}, one per line`, input(key, 0, true, "lines")));
+        else if (spec.type === "integer") box.append(field(`${label} (${spec.min} to ${spec.max})`, input(key, 0, false, "number")));
+        else if (spec.type === "boolean") box.append(boolRow(key, label));
+        else if (spec.type === "choice") box.append(field(label, select(key, spec.options.map((o) => [o, o]))));
+      }
     } else if (w.type === "stats") {
       const row = el("div", "cfg-row");
       for (const f of STAT_FIELDS) {
@@ -2747,7 +2956,7 @@ function startConfigurator() {
         say(`Skipped a ${type} from the file, the board already has one`);
         continue;
       }
-      if (Array.isArray(list) && parsed.fromSpec && parsed.widget && ALL_TYPES.includes(type) && parsed.widget.id) {
+      if (Array.isArray(list) && parsed.fromSpec && parsed.widget && knownType(type) && parsed.widget.id) {
         /* layout import handled elsewhere */
       }
       const match = live().find(
@@ -2901,6 +3110,13 @@ function startConfigurator() {
   }
 
   async function load() {
+    try {
+      await loadTileCatalog();
+      registerCatalogEditing();
+      renderGallery();
+    } catch (err) {
+      say(`Could not load the tile catalog: ${err.message || err}`);
+    }
     const [w, c, s, t] = await Promise.all([
       api("GET", "/api/widgets"),
       api("GET", "/api/config"),
@@ -3039,7 +3255,105 @@ function startConfigurator() {
   window.__deskcfg = { S, takeFiles, apply, renderCards, parseIcs, parseText, parseJson, parseCsvRows, csvDefaults, board };
 }
 
+/* ---------- tile preview ---------- */
+
+// /?tilepreview=<id>&theme=<theme> draws one catalog tile at all four spans
+// on a 4 by 3 board with its example data. Add &check for the overflow report.
+const PREVIEW_SPANS = [
+  [2, 2],
+  [1, 2],
+  [1, 1],
+  [2, 1],
+];
+
+async function startTilePreview() {
+  document.documentElement.classList.add("kiosk");
+  const root = el("div");
+  clear(document.body);
+  document.body.append(root);
+  const board = new Board(root);
+  const id = PARAMS.get("tilepreview") || "";
+  const check = PARAMS.has("check");
+  const resize = () => {
+    board.setScale(window.innerWidth, window.innerHeight);
+    board.fit();
+  };
+  board.setScale(window.innerWidth, window.innerHeight);
+  window.addEventListener("resize", resize);
+  const report = () => document.documentElement.setAttribute("data-overflow", JSON.stringify(overflowReport(root)));
+  const say = (text) => {
+    clear(board.grid);
+    board.grid.append(el("p", "empty-hint", text));
+    if (check) report();
+  };
+  let status = {};
+  let config = {};
+  let themes = [];
+  try {
+    const [st, cf, th] = await Promise.all(["/api/status", "/api/config", "/api/themes"].map((u) => fetch(u, { cache: "no-store" }).then((r) => r.json())));
+    status = st;
+    config = cf;
+    themes = Array.isArray(th.themes) ? th.themes : [];
+    await loadTileCatalog();
+  } catch (err) {
+    say(`Could not load the board: ${err.message || err}`);
+    return;
+  }
+  const meta = TILE_CATALOG.get(id);
+  if (!meta) {
+    const off = tileCatalogAll.find((t) => t && t.id === id);
+    say(off ? `${id} is off. Add it to enabled_community_tiles in config.json and restart.` : `No tile named ${id}`);
+    return;
+  }
+  if (!TILE_RENDERERS.has(id)) {
+    say(`tiles/${id}/render.js did not register a renderer`);
+    return;
+  }
+  const theme = PARAMS.get("theme") || config.theme || status.theme;
+  board.applyConfig({ ...status, ...config, theme });
+  await board.applyTheme(theme);
+  board.gridCols = 4;
+  board.gridRows = 3;
+  board.markNode.textContent = `${meta.name} preview`;
+  board.zoneNode.textContent = theme;
+  if (!check && themes.length) {
+    const pick = el("select", "preview-theme");
+    for (const t of themes) {
+      const o = el("option", null, t.name || t.id);
+      o.value = t.id;
+      pick.append(o);
+    }
+    pick.value = theme;
+    pick.addEventListener("change", () => {
+      const next = new URLSearchParams(location.search);
+      next.set("theme", pick.value);
+      location.search = next.toString();
+    });
+    clear(board.zoneNode);
+    board.zoneNode.append(pick);
+  }
+  const widgets = PREVIEW_SPANS.map(([cs, rs], i) => ({
+    ...JSON.parse(JSON.stringify(meta.example)),
+    id: `preview-${cs}x${rs}`,
+    type: id,
+    enabled: true,
+    order: i * 10,
+    col_span: cs,
+    row_span: rs,
+  }));
+  board.setWidgets(widgets);
+  board.paintStats(status);
+  setInterval(() => board.paintClock(), 1000);
+  const done = () => {
+    board.fit();
+    if (check) report();
+  };
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(done, 150));
+  else setTimeout(done, 150);
+}
+
 /* ---------- boot ---------- */
 
-if (PARAMS.has("config") || location.pathname.replace(/\/+$/, "") === "/config") startConfigurator();
+if (PARAMS.has("tilepreview")) startTilePreview();
+else if (PARAMS.has("config") || location.pathname.replace(/\/+$/, "") === "/config") startConfigurator();
 else startKiosk();

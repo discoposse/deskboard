@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Tile catalog. Each tile type outside the built-in set is a folder under `tiles/` with `tile.json`, `render.js`, an optional `tile.css`, and `README.md`. The server discovers folders at startup and validates widget fields against `tile.json`.
+- The metric widget now lives in `tiles/metric/` as the reference tile. Its API and look are unchanged.
+- `tiles/community/` for contributed tiles, off until listed in the new `enabled_community_tiles` config key (file only, not editable through `PATCH /api/config`). Includes a sample `quote` tile.
+- `scripts/new_tile.sh <id>` scaffolds a tile that passes `python3 tiles.py check`.
+- `/?tilepreview=<id>` shows one tile at every span, and `scripts/run_overflow.sh` now checks every discovered tile in every theme and size.
+- `GET /api/tiles` lists the catalog. Pages are served with `Content-Security-Policy: connect-src 'self'`.
+- `docs/tiles.md`, a tile checklist in `CONTRIBUTING.md`, and a pull request template.
 - README examples with an animation of the configurator and the board side by side, recorded by `scripts/record_demo.sh`.
 - Fix the board not switching themes until a reload when the theme changed in the configurator or through `PATCH /api/config`.
 

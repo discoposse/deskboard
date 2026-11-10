@@ -29,15 +29,17 @@ from fetches import (
 from widgets import (
     ID_RE,
     SINGLETONS,
-    TYPES,
     WidgetError,
+    catalog,
     create_widget,
     delete_widget,
     get_widget,
     list_widgets,
     max_widgets,
+    reload_catalog,
     reorder_widgets,
     replace_widgets,
+    types,
     update_widget,
 )
 
@@ -241,7 +243,7 @@ def api_index() -> dict:
     return {
         "service": "deskboard",
         "widgets": {
-            "types": list(TYPES),
+            "types": list(types()),
             "limit": max_widgets(),
             "singleton": sorted(SINGLETONS),
         },
@@ -257,10 +259,30 @@ def api_index() -> dict:
             "PATCH /api/config",
             "GET /api/status",
             "GET /api/themes",
+            "GET /api/tiles",
             "GET /api/widget-data/{id}",
             "GET /api/github",
         ],
     }
+
+
+def list_tiles() -> dict:
+    return {"tiles": catalog().meta()}
+
+
+TILE_ASSETS = {"render.js", "tile.css"}
+
+
+def tile_asset(url_path: str) -> Path | None:
+    """/tiles/<id>/render.js or /tiles/<id>/tile.css for an enabled tile."""
+    parts = url_path.strip("/").split("/")
+    if len(parts) != 3 or parts[0] != "tiles" or parts[2] not in TILE_ASSETS:
+        return None
+    tile = catalog().get(parts[1])
+    if tile is None:
+        return None
+    path = tile.path / parts[2]
+    return path if path.is_file() else None
 
 
 def clean_path(raw: str) -> str | None:
@@ -353,6 +375,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/themes" and method == "GET":
             self._json(200, list_themes(), head=head)
             return
+        if path == "/api/tiles" and method == "GET":
+            self._json(200, list_tiles(), head=head)
+            return
         if path == "/api/github" and method == "GET":
             self._json(200, bulk_github(), head=head)
             return
@@ -417,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/", "/config"):
             file_path = safe_file("/index.html")
+        elif path.startswith("/tiles/"):
+            file_path = tile_asset(path)
         else:
             file_path = safe_file(path)
         if file_path is None:
@@ -489,6 +516,9 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        if content_type.startswith("text/html"):
+            # Page scripts, tile render code included, may only call this server.
+            self.send_header("Content-Security-Policy", "connect-src 'self'")
         self.end_headers()
         if not head:
             self.wfile.write(body)
@@ -541,6 +571,10 @@ def ensure_bound(port: int, bound: dict, lock: threading.Lock) -> None:
 
 def main() -> None:
     port = load_config()["port"]
+    found = reload_catalog()
+    for problem in found.problems:
+        print(f"deskboard tiles: {problem}", flush=True)
+    print(f"deskboard tiles: {', '.join(found.ids()) or 'none'}", flush=True)
     bound: dict = {}
     lock = threading.Lock()
     ensure_bound(port, bound, lock)

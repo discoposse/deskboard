@@ -1,0 +1,32 @@
+/* Sizes use em so the board's text fitting scales the whole quote. */
+.board .tile-quote .tile-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.board .tile-quote .quote-body {
+  margin: 0;
+  overflow: hidden;
+}
+
+.board .tile-quote .quote-text {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  line-height: 1.25;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.board .tile-quote .quote-author {
+  margin: 0.6em 0 0;
+  font-size: 0.45em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+}

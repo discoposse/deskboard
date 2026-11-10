@@ -447,13 +447,7 @@ html.kiosk .board {
   -webkit-box-orient: vertical;
 }
 
-/* metric */
-
-.board .tile.metric .tile-body {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
+/* metric (layout lives in tiles/metric/tile.css; the text styles below are shared) */
 
 .board .metric-label,
 .board .metric-hint {
@@ -1331,4 +1325,17 @@ html.cfg body {
 
 .cfg-privacy {
   color: var(--warn);
+}
+
+/* tile preview (/?tilepreview=<id>) */
+
+.board .zone .preview-theme {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--muted);
+  background: var(--tile);
+  border: 1px solid var(--tile-line);
+  border-radius: 4px;
+  padding: 2px 6px;
 }

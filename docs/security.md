@@ -21,6 +21,17 @@ Prefer Tailscale (tailnet only) for remote editing. Do not put the port on the o
 - Embed URLs must match `embed_allowlist` hostnames.
 - GitHub tokens come from `DESKBOARD_GITHUB_TOKEN` in the environment only. Never paste tokens into widget JSON or notes.
 
+## Tile code
+
+Tile folders under `tiles/` ship a small `render.js` that runs in the board page. The board limits what that code can do.
+
+- Render output is rebuilt from a short list of text tags with only `class` kept. Scripts, images, links, frames, and inline styles never reach the page.
+- `tiles.py check` refuses render code that names network, storage, DOM, timer, or dynamic code globals.
+- Pages carry `Content-Security-Policy: connect-src 'self'`, so page scripts can only call this server.
+- Community tiles under `tiles/community/` are off until their id is listed in `enabled_community_tiles` in `config.json`. The API cannot turn them on.
+
+These checks are guard rails. Read a community tile before you enable it.
+
 Treat the board like a shared whiteboard. No secrets, no private mail, no credentials.
 
 ## Kiosk notes
