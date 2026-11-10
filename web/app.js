@@ -1300,9 +1300,12 @@ function startKiosk() {
       const status = await statusResponse.json();
       const body = await widgetResponse.json();
       const config = configResponse.ok ? await configResponse.json() : {};
+      // applyConfig records the wanted theme id, so compare against the one painted before it.
+      const paintedTheme = board.themeId;
       board.applyConfig({ ...status, ...config });
-      if (!themeReady || board.themeId !== (config.theme || status.theme)) {
-        await board.applyTheme(config.theme || status.theme);
+      const wantedTheme = config.theme || status.theme;
+      if (!themeReady || paintedTheme !== wantedTheme) {
+        await board.applyTheme(wantedTheme);
         themeReady = true;
         board.drawn = null;
       }
