@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- README examples with an animation of the configurator and the board side by side, recorded by `scripts/record_demo.sh`.
+- Fix the board not switching themes until a reload when the theme changed in the configurator or through `PATCH /api/config`.
+
 ## 0.1.0
 
 - First community release of Deskboard.

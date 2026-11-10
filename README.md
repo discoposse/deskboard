@@ -6,6 +6,60 @@ A self-hosted desk dashboard for a spare mini PC and a monitor. It runs fullscre
 
 ![Tiling theme](shots/board-theme-tiling-1920x1080.png)
 
+## See it in action
+
+The configurator (`/?config`) on the left and the board on the right. Each edit goes to the board through the same API you can call with `curl`, and the board picks it up on its next 5 second refresh.
+
+![Configurator and board side by side](docs/media/demo-configurator-board.gif)
+
+The board on its own, same four edits.
+
+![Board updating after each edit](docs/media/demo-board.gif)
+
+Higher quality video in [docs/media/demo-configurator-board.mp4](docs/media/demo-configurator-board.mp4). Rebuild all three with `bash scripts/record_demo.sh` (needs Node 22+, Chrome or Chromium, and ffmpeg).
+
+### Examples
+
+These start from the sample layout in `examples/demo-board.json` and match the animation step by step. In the configurator, tile edits stay pending until you press **Apply to board**, which sends the whole layout with `PUT /api/widgets/import`. The `curl` lines make the same change one route at a time.
+
+**1. Move a tile.** Drag the Today card above World clocks under "Tiles, drag to reorder", then press Apply to board. Clock and Stats always stay first.
+
+```bash
+curl -s http://127.0.0.1:8730/api/widgets/order \
+  -X PUT -H 'Content-Type: application/json' \
+  -d '{"ids":["clock","stats","today","world","focus","metric1","themeart"]}'
+```
+
+**2. Add a world clock city.** Press Edit on World clocks and add a line to Cities in `Label|Timezone` form, here `Sydney|Australia/Sydney`. Send the full list on the API.
+
+```bash
+curl -s http://127.0.0.1:8730/api/widgets/world \
+  -X PATCH -H 'Content-Type: application/json' \
+  -d '{"cities":[
+        {"label":"New York","zone":"America/New_York"},
+        {"label":"London","zone":"Europe/London"},
+        {"label":"Tokyo","zone":"Asia/Tokyo"},
+        {"label":"Sydney","zone":"Australia/Sydney"}]}'
+```
+
+**3. Rewrite a list and make it taller.** Press Edit on Today, replace the items (one per line), and pick the 1×2 span button. Spans are `1` or `2` for both `col_span` and `row_span`.
+
+```bash
+curl -s http://127.0.0.1:8730/api/widgets/today \
+  -X PATCH -H 'Content-Type: application/json' \
+  -d '{"items":["Record the demo GIF","Tag v1.0","Water the plants"],"row_span":2}'
+```
+
+**4. Switch the theme.** Click Nord under Theme. This one saves right away with no Apply step.
+
+```bash
+curl -s http://127.0.0.1:8730/api/config \
+  -X PATCH -H 'Content-Type: application/json' \
+  -d '{"theme":"nord"}'
+```
+
+`GET /api/themes` lists every theme id. Full route list in [docs/api.md](docs/api.md).
+
 ## Quick start (any OS)
 
 Needs Python 3.10+.
