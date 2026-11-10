@@ -120,6 +120,7 @@ DEFAULT_WIDGETS = [
 TYPE_ORDER = BUILTIN_TYPES[:5] + ("metric",) + BUILTIN_TYPES[5:]
 
 _catalog: tiles.Catalog | None = None
+_catalog_version = 0
 
 
 class WidgetError(Exception):
@@ -137,10 +138,42 @@ def catalog() -> tiles.Catalog:
 
 
 def reload_catalog() -> tiles.Catalog:
-    global _catalog
+    """Rescan tiles/ and swap in the new catalog. Also rereads
+    enabled_community_tiles from config.json. Each load bumps the version
+    the board uses to fetch fresh render.js and tile.css."""
+    global _catalog, _catalog_version
     enabled = load_config().get("enabled_community_tiles") or []
-    _catalog = tiles.discover(enabled_community=enabled, reserved=BUILTIN_TYPES)
+    fresh = tiles.discover(enabled_community=enabled, reserved=BUILTIN_TYPES)
+    # A tile that was loaded and now fails its checks keeps its last good
+    # version, so one bad edit does not take its tiles off the board.
+    if _catalog is not None:
+        for tile_id, old in _catalog.tiles.items():
+            if tile_id in fresh.tiles or tile_id in fresh.disabled or not old.path.is_dir():
+                continue
+            if old.source != "core" and tile_id not in enabled:
+                continue
+            fresh.tiles[tile_id] = old
+            fresh.problems.append(f"{tile_id}: kept the last good version until the folder passes again")
+    _catalog_version += 1
+    fresh.version = _catalog_version
+    _catalog = fresh
     return _catalog
+
+
+def _short(problem: str) -> str:
+    """Show tile folders as tiles/<id> so the API never prints server paths."""
+    root = str(tiles.tiles_dir())
+    return "tiles" + problem[len(root):] if problem.startswith(root) else problem
+
+
+def reload_summary(found: tiles.Catalog) -> dict:
+    return {
+        "ok": not found.problems,
+        "version": found.version,
+        "loaded": [{"id": t.id, "source": t.source} for t in found.tiles.values()],
+        "disabled": sorted(found.disabled),
+        "skipped": [_short(p) for p in found.problems],
+    }
 
 
 def types() -> tuple:

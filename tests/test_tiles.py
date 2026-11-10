@@ -320,5 +320,66 @@ class ScaffoldTests(CatalogCase):
         self.assertNotEqual(run().returncode, 0)
 
 
+class ReloadTests(CatalogCase):
+    def setUp(self):
+        super().setUp()
+        self.root = self.tile_root()
+        import serve
+
+        self.serve = serve
+        self.w.reload_catalog()
+
+    def test_reload_picks_up_an_added_tile(self):
+        self.assertIsNone(self.w.catalog().get("tides"))
+        self.tiles.scaffold("tides", root=self.root, reserved=self.w.BUILTIN_TYPES)
+        before = self.w.catalog().version
+        summary = self.serve.reload_tiles({})
+        self.assertTrue(summary["ok"], summary)
+        self.assertGreater(summary["version"], before)
+        self.assertIn({"id": "tides", "source": "core"}, summary["loaded"])
+        self.assertIn("tides", self.w.types())
+        self.assertIsNotNone(self.serve.tile_asset("/tiles/tides/render.js"))
+        self.assertEqual(self.serve.list_tiles()["version"], summary["version"])
+        self.assertEqual(self.serve.status()["tiles_version"], summary["version"])
+
+    def test_reload_rejects_an_invalid_tile_and_keeps_the_rest(self):
+        self.w.create_widget({"type": "metric", "id": "m", "label": "Outside", "value": "12"})
+        bad = self.root / "broken"
+        bad.mkdir()
+        (bad / "tile.json").write_text('{"id": "broken"', encoding="utf-8")
+        (bad / "render.js").write_text("fetch('/x')\n", encoding="utf-8")
+        summary = self.serve.reload_tiles({})
+        self.assertFalse(summary["ok"])
+        self.assertTrue("tiles/broken: missing README.md" in summary["skipped"], summary)
+        self.assertNotIn("broken", [t["id"] for t in summary["loaded"]])
+        self.assertIn("metric", [t["id"] for t in summary["loaded"]])
+        self.assertIn("m", [x["id"] for x in self.w.list_widgets()])
+        with self.assertRaises(self.w.WidgetError):
+            self.w.create_widget({"type": "broken", "id": "b"})
+
+    def test_a_bad_edit_keeps_the_last_good_version(self):
+        self.w.create_widget({"type": "metric", "id": "m", "label": "Outside", "value": "12"})
+        good = self.serve.tile_asset("/tiles/metric/render.js")[0]
+        js = self.root / "metric" / "render.js"
+        js.write_text(js.read_text(encoding="utf-8") + "\nfetch('/x');\n", encoding="utf-8")
+        summary = self.serve.reload_tiles({})
+        self.assertFalse(summary["ok"])
+        self.assertTrue(any("kept the last good version" in p for p in summary["skipped"]), summary)
+        self.assertEqual(self.serve.tile_asset("/tiles/metric/render.js")[0], good)
+        self.assertIn("m", [x["id"] for x in self.w.list_widgets()])
+        js.write_text(good.decode("utf-8"), encoding="utf-8")
+        self.assertTrue(self.serve.reload_tiles({})["ok"])
+
+    def test_reload_rereads_enabled_community_tiles(self):
+        self.assertIsNone(self.w.catalog().get("quote"))
+        self.config_path.write_text(json.dumps({"enabled_community_tiles": ["quote"]}), encoding="utf-8")
+        summary = self.serve.reload_tiles({})
+        self.assertIn({"id": "quote", "source": "community"}, summary["loaded"])
+
+    def test_reload_takes_an_empty_body_only(self):
+        with self.assertRaises(self.w.WidgetError):
+            self.serve.reload_tiles({"tiles": "x"})
+
+
 if __name__ == "__main__":
     unittest.main()

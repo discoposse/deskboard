@@ -92,7 +92,11 @@ Each tile type outside the built-in set is one folder under `tiles/` with a `til
 scripts/new_tile.sh my_tile
 ```
 
-Restart the server and open `http://127.0.0.1:8730/?tilepreview=my_tile` to see it at every span. Contributed tiles go under `tiles/community/` and stay off until you list them in `enabled_community_tiles`. The full guide is [docs/tiles.md](docs/tiles.md), and the checklist is in [CONTRIBUTING.md](CONTRIBUTING.md).
+Run `scripts/reload.sh` and open `http://127.0.0.1:8730/?tilepreview=my_tile` to see it at every span. Contributed tiles go under `tiles/community/` and stay off until you list them in `enabled_community_tiles`. The full guide is [docs/tiles.md](docs/tiles.md), and the checklist is in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Reloading
+
+`scripts/reload.sh` tells a running server to rescan `tiles/`. It prints what loaded and what was skipped, and the board picks up the change within 5 seconds. The configurator has a **Reload tiles** button that does the same, and `POST /api/reload` is the API route behind both. A broken tile folder is skipped without touching the others. Restart the service only after changing server Python files (`sudo systemctl restart deskboard` on Ubuntu). See [docs/tiles.md](docs/tiles.md#reloading).
 
 ## Install as a desk kiosk (Ubuntu)
 

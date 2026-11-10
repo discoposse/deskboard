@@ -117,18 +117,21 @@ function knownType(type) {
   return BUILTIN_TYPES.has(type) || TILE_CATALOG.has(type);
 }
 
-function loadTileAssets(meta) {
+function loadTileAssets(meta, version) {
   const id = encodeURIComponent(meta.id);
+  const v = encodeURIComponent(String(version || 0));
   const waits = [];
   if (meta.has_css) {
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = `/tiles/${id}/tile.css`;
+    link.dataset.tileAsset = meta.id;
+    link.href = `/tiles/${id}/tile.css?v=${v}`;
     waits.push(new Promise((resolve) => (link.onload = link.onerror = resolve)));
     document.head.append(link);
   }
   const script = document.createElement("script");
-  script.src = `/tiles/${id}/render.js`;
+  script.dataset.tileAsset = meta.id;
+  script.src = `/tiles/${id}/render.js?v=${v}`;
   waits.push(new Promise((resolve) => (script.onload = script.onerror = resolve)));
   document.head.append(script);
   return Promise.all(waits);
@@ -136,6 +139,7 @@ function loadTileAssets(meta) {
 
 let tileCatalogLoad = null;
 let tileCatalogAll = [];
+let tileCatalogVersion = null;
 
 // Load the catalog once. A failed request is retried on the next call.
 function loadTileCatalog() {
@@ -145,19 +149,34 @@ function loadTileCatalog() {
       if (!res.ok) throw new Error(`GET /api/tiles: ${res.status}`);
       const data = await res.json();
       tileCatalogAll = Array.isArray(data.tiles) ? data.tiles : [];
+      tileCatalogVersion = data.version;
       const fresh = [];
       for (const meta of tileCatalogAll) {
         if (!meta || !meta.enabled || TILE_CATALOG.has(meta.id)) continue;
         TILE_CATALOG.set(meta.id, deepFreeze(meta));
         fresh.push(meta);
       }
-      await Promise.all(fresh.map(loadTileAssets));
+      await Promise.all(fresh.map((meta) => loadTileAssets(meta, data.version)));
     })().catch((err) => {
       tileCatalogLoad = null;
       throw err;
     });
   }
   return tileCatalogLoad;
+}
+
+// After POST /api/reload: drop every tile renderer and stylesheet, then load
+// the catalog again. The version in each asset URL skips the browser cache.
+function dropTileCatalog() {
+  TILE_CATALOG.clear();
+  TILE_RENDERERS.clear();
+  for (const node of document.querySelectorAll("[data-tile-asset]")) node.remove();
+  tileCatalogLoad = null;
+}
+
+function reloadTileCatalog() {
+  dropTileCatalog();
+  return loadTileCatalog();
 }
 
 function zonedParts(date, timeZone) {
@@ -1433,6 +1452,10 @@ function startKiosk() {
       const status = await statusResponse.json();
       const body = await widgetResponse.json();
       const config = configResponse.ok ? await configResponse.json() : {};
+      if (tilesReady && status.tiles_version != null && status.tiles_version !== tileCatalogVersion) {
+        tilesReady = false;
+        dropTileCatalog();
+      }
       if (!tilesReady) {
         try {
           await loadTileCatalog();
@@ -2242,11 +2265,13 @@ function startConfigurator() {
   const reloadBtn = el("button", "cfg-btn", "Reload from board");
   const exportBtn = el("button", "cfg-btn", "Export JSON");
   const importBtn = el("button", "cfg-btn", "Import JSON");
+  const reloadTilesBtn = el("button", "cfg-btn", "Reload tiles");
+  reloadTilesBtn.title = "Rescan tiles/ on the server and pick up new or changed tiles";
   const importInput = el("input");
   importInput.type = "file";
   importInput.accept = ".json,application/json";
   importInput.style.display = "none";
-  actions.append(applyBtn, undoBtn, discardBtn, reloadBtn, exportBtn, importBtn, importInput);
+  actions.append(applyBtn, undoBtn, discardBtn, reloadBtn, exportBtn, importBtn, reloadTilesBtn, importInput);
   prevSec.append(actions);
   const log = el("pre", "cfg-log", "Loading the board…");
   prevSec.append(log);
@@ -3224,6 +3249,30 @@ function startConfigurator() {
     });
     renderCards();
     say("Changes discarded.");
+  });
+  reloadTilesBtn.addEventListener("click", async () => {
+    if (S.busy) return;
+    S.busy = true;
+    reloadTilesBtn.disabled = true;
+    let lines = [];
+    try {
+      const r = await api("POST", "/api/reload", {});
+      lines.push(`Tiles reloaded (version ${r.version}). Loaded: ${r.loaded.map((t) => t.id).join(", ") || "none"}.`);
+      if (r.disabled.length) lines.push(`Off: ${r.disabled.join(", ")}.`);
+      for (const p of r.skipped) lines.push(`Skipped ${p}`);
+      await reloadTileCatalog();
+      registerCatalogEditing();
+      renderGallery();
+      board.drawn = null;
+    } catch (err) {
+      lines.push(`Reload failed: ${err.message || err}`);
+    } finally {
+      S.busy = false;
+      reloadTilesBtn.disabled = false;
+    }
+    renderCards();
+    lines.push("The board picks up the new tiles within 5 seconds. Unsaved edits are still pending.");
+    say(lines.join("\n"));
   });
   reloadBtn.addEventListener("click", () =>
     load()

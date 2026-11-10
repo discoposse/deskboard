@@ -27,7 +27,56 @@ The server reads every folder once at startup. A folder that fails validation is
 
 1. Scaffold it with `scripts/new_tile.sh my_tile` (add `--community` for a contributed tile). The stub passes validation as is.
 2. Edit `tile.json` for the fields and `render.js` for the markup. Keep `README.md` current with a sample payload.
-3. Restart `serve.py`, open `http://127.0.0.1:8730/?tilepreview=my_tile`, then run the checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
+3. Run `scripts/reload.sh`, open `http://127.0.0.1:8730/?tilepreview=my_tile`, then run the checks in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Reloading
+
+A running server picks up new and changed tile folders without a restart. Pick one of these.
+
+- Run `scripts/reload.sh` on the machine that runs the server.
+- Click **Reload tiles** in the configurator at `/?config`.
+- Send `POST /api/reload` with an empty JSON body.
+
+```bash
+scripts/reload.sh
+DESKBOARD_URL=http://127.0.0.1:8731 scripts/reload.sh   # a server on another port
+```
+
+The script prints each tile it loaded, each community tile that is off, and each folder it skipped with the reason. It exits 0 when every folder loaded, 1 when a folder was skipped, and 2 when it could not reach the server.
+
+```text
+tiles version 3
+loaded   metric (core)
+loaded   my_tile (core)
+off      quote (list it in enabled_community_tiles to turn it on)
+skipped  tiles/broken: missing render.js
+```
+
+A reload rescans `tiles/` and `tiles/community/`, rereads `enabled_community_tiles` from `config.json`, and runs the same checks as startup. Every reload bumps the catalog version. The board sees the new version on its next poll (within 5 seconds), drops its tile code, and fetches `render.js` and `tile.css` again with `?v=<version>` in the URL, so the browser cache never serves an old copy. Open preview pages need a page reload.
+
+A folder that fails its checks is skipped and the other tiles keep working. If a tile that was already loaded fails after an edit, the server keeps serving the last version that passed and lists the tile under `skipped` until you fix it. The server serves the copy of `render.js` and `tile.css` it checked, so a bad edit on disk never reaches the board.
+
+Deleting a tile folder and reloading removes the tile type. Widgets of that type are left out of the board and dropped from `widgets.json` the next time the layout is saved.
+
+### When to restart instead
+
+Reload covers tile folders and `enabled_community_tiles`. Restart the service after you change any server Python file (`serve.py`, `widgets.py`, `tiles.py`, `deskboard_config.py`, `fetches.py`) or a config key the server reads only at startup, such as the port or bind addresses.
+
+On Ubuntu with the units in `systemd/`
+
+```bash
+sudo systemctl restart deskboard          # server Python or startup config
+sudo systemctl restart deskboard-kiosk    # kiosk.py or a stuck kiosk browser
+journalctl -u deskboard -n 50             # startup log, including tile problems
+```
+
+On macOS with a LaunchAgent (use the label from your own plist)
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.example.deskboard
+```
+
+Changes to `web/app.js`, `web/style.css`, or a theme need a reload of the board page only. The kiosk service restart above does that on a desk kiosk.
 
 ## tile.json
 
@@ -103,7 +152,7 @@ Size inner text in `em` when the tile uses `"fit": "text"`, so it scales with th
 
 ## Community tiles
 
-Folders under `tiles/community/` are off by default. To turn one on, list its id in `config.json` and restart the server.
+Folders under `tiles/community/` are off by default. To turn one on, list its id in `config.json` and run `scripts/reload.sh`.
 
 ```json
 {
@@ -121,10 +170,16 @@ This key is read from the file only. `PATCH /api/config` refuses it, because a c
 
 ## API
 
-`GET /api/tiles` returns the catalog.
+`GET /api/tiles` returns the catalog and its version.
 
 ```json
-{"tiles": [{"id": "metric", "name": "Metric", "source": "core", "enabled": true, "col_span": 1, "row_span": 1, "fit": "metric", "fields": {}, "example": {}, "has_css": true}]}
+{"version": 1, "tiles": [{"id": "metric", "name": "Metric", "source": "core", "enabled": true, "col_span": 1, "row_span": 1, "fit": "metric", "fields": {}, "example": {}, "has_css": true}]}
 ```
 
 Catalog tiles use the same widget routes as built-in ones (`POST /api/widgets`, `PATCH /api/widgets/{id}`, `PUT /api/widgets/import`), and they count toward `max_widgets`. The board loads `/tiles/<id>/render.js` and `/tiles/<id>/tile.css` for enabled tiles only. Nothing else in a tile folder is served.
+
+`POST /api/reload` takes `{}` and returns the reload summary. `ok` is false when any folder was skipped. `GET /api/status` includes `tiles_version`.
+
+```json
+{"ok": false, "version": 3, "loaded": [{"id": "metric", "source": "core"}], "disabled": ["quote"], "skipped": ["tiles/broken: missing render.js"]}
+```

@@ -29,6 +29,7 @@ Tile folders under `tiles/` ship a small `render.js` that runs in the board page
 - `tiles.py check` refuses render code that names network, storage, DOM, timer, or dynamic code globals.
 - Pages carry `Content-Security-Policy: connect-src 'self'`, so page scripts can only call this server.
 - Community tiles under `tiles/community/` are off until their id is listed in `enabled_community_tiles` in `config.json`. The API cannot turn them on.
+- `POST /api/reload` only rescans folders already on disk and rereads `config.json`. It takes no tile code or config in the request, and it reports skipped folders as `tiles/<id>` without server paths.
 
 These checks are guard rails. Read a community tile before you enable it.
 

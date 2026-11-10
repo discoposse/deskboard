@@ -7,6 +7,7 @@
 - `tiles/community/` for contributed tiles, off until listed in the new `enabled_community_tiles` config key (file only, not editable through `PATCH /api/config`). Includes a sample `quote` tile.
 - `scripts/new_tile.sh <id>` scaffolds a tile that passes `python3 tiles.py check`.
 - `/?tilepreview=<id>` shows one tile at every span, and `scripts/run_overflow.sh` now checks every discovered tile in every theme and size.
+- `POST /api/reload`, `scripts/reload.sh`, and a **Reload tiles** button in the configurator pick up new and changed tiles without a restart. The board refetches tile code within 5 seconds, and a tile that fails after an edit keeps its last good version.
 - `GET /api/tiles` lists the catalog. Pages are served with `Content-Security-Policy: connect-src 'self'`.
 - `docs/tiles.md`, a tile checklist in `CONTRIBUTING.md`, and a pull request template.
 - README examples with an animation of the configurator and the board side by side, recorded by `scripts/record_demo.sh`.

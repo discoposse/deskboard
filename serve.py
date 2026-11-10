@@ -37,6 +37,7 @@ from widgets import (
     list_widgets,
     max_widgets,
     reload_catalog,
+    reload_summary,
     reorder_widgets,
     replace_widgets,
     types,
@@ -163,6 +164,7 @@ def status() -> dict:
         "mem_total": mem_total,
         "mem_available": mem_available,
         "temp_c": _read_temp(),
+        "tiles_version": catalog().version,
     }
 
 
@@ -260,6 +262,7 @@ def api_index() -> dict:
             "GET /api/status",
             "GET /api/themes",
             "GET /api/tiles",
+            "POST /api/reload",
             "GET /api/widget-data/{id}",
             "GET /api/github",
         ],
@@ -267,22 +270,34 @@ def api_index() -> dict:
 
 
 def list_tiles() -> dict:
-    return {"tiles": catalog().meta()}
+    current = catalog()
+    return {"version": current.version, "tiles": current.meta()}
 
 
-TILE_ASSETS = {"render.js", "tile.css"}
+def reload_tiles(data: dict) -> dict:
+    if data:
+        raise WidgetError("body must be {}")
+    found = reload_catalog()
+    for problem in found.problems:
+        print(f"deskboard tiles: {problem}", flush=True)
+    print(f"deskboard tiles reloaded (v{found.version}): {', '.join(found.ids()) or 'none'}", flush=True)
+    return reload_summary(found)
 
 
-def tile_asset(url_path: str) -> Path | None:
-    """/tiles/<id>/render.js or /tiles/<id>/tile.css for an enabled tile."""
+def tile_asset(url_path: str) -> tuple[bytes, str] | None:
+    """/tiles/<id>/render.js or /tiles/<id>/tile.css for an enabled tile,
+    as checked when the catalog was last loaded."""
     parts = url_path.strip("/").split("/")
-    if len(parts) != 3 or parts[0] != "tiles" or parts[2] not in TILE_ASSETS:
+    if len(parts) != 3 or parts[0] != "tiles":
         return None
     tile = catalog().get(parts[1])
     if tile is None:
         return None
-    path = tile.path / parts[2]
-    return path if path.is_file() else None
+    if parts[2] == "render.js":
+        return tile.render_js, TYPES_BY_EXT[".js"]
+    if parts[2] == "tile.css" and tile.tile_css is not None:
+        return tile.tile_css, TYPES_BY_EXT[".css"]
+    return None
 
 
 def clean_path(raw: str) -> str | None:
@@ -378,6 +393,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tiles" and method == "GET":
             self._json(200, list_tiles(), head=head)
             return
+        if path == "/api/reload" and method == "POST":
+            self._mutate(method, path, reload_tiles)
+            return
         if path == "/api/github" and method == "GET":
             self._json(200, bulk_github(), head=head)
             return
@@ -440,10 +458,15 @@ class Handler(BaseHTTPRequestHandler):
         if method != "GET":
             self._error(405, "method not allowed")
             return
+        if path.startswith("/tiles/"):
+            asset = tile_asset(path)
+            if asset is None:
+                self._send(404, "text/plain; charset=utf-8", b"not found\n", head, cache=False)
+            else:
+                self._send(200, asset[1], asset[0], head, cache=False)
+            return
         if path in ("/", "/config"):
             file_path = safe_file("/index.html")
-        elif path.startswith("/tiles/"):
-            file_path = tile_asset(path)
         else:
             file_path = safe_file(path)
         if file_path is None:

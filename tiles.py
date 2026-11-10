@@ -103,6 +103,11 @@ class Tile:
     enabled: bool
     has_css: bool
     problems: list = field(default_factory=list)
+    # render.js and tile.css as read and checked at discovery. The server
+    # serves these bytes, so a later bad edit on disk never reaches the board
+    # until a reload accepts it.
+    render_js: bytes = b""
+    tile_css: bytes | None = None
 
     @property
     def fields(self) -> dict:
@@ -129,6 +134,7 @@ class Catalog:
     tiles: dict = field(default_factory=dict)
     disabled: dict = field(default_factory=dict)
     problems: list = field(default_factory=list)
+    version: int = 0
 
     def get(self, tile_id: str) -> Tile | None:
         return self.tiles.get(tile_id)
@@ -180,7 +186,17 @@ def discover(enabled_community=(), reserved=(), root: Path | None = None) -> Cat
             catalog.problems.append(f"{_rel(path)}: id {tile_id} is already used by another tile")
             continue
         enabled = source == "core" or tile_id in enabled_community
-        tile = Tile(tile_id, path, source, spec, enabled, (path / "tile.css").is_file())
+        css_path = path / "tile.css"
+        tile = Tile(
+            tile_id,
+            path,
+            source,
+            spec,
+            enabled,
+            css_path.is_file(),
+            render_js=(path / "render.js").read_bytes(),
+            tile_css=css_path.read_bytes() if css_path.is_file() else None,
+        )
         if enabled:
             catalog.tiles[tile_id] = tile
         else:

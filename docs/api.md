@@ -15,6 +15,7 @@ GET    /api/config
 PATCH  /api/config
 GET    /api/themes
 GET    /api/tiles
+POST   /api/reload
 GET    /api/widgets
 POST   /api/widgets
 GET    /api/widgets/{id}
@@ -46,7 +47,7 @@ Unknown fields are rejected. Send only the fields you mean to change on `PATCH`.
 
 ## Tiles
 
-`GET /api/tiles` lists every tile folder the server found at startup with its fields, example values, and whether it is enabled. Catalog tiles use the widget routes above and count toward the widget cap. See [tiles.md](tiles.md).
+`GET /api/tiles` lists every tile folder the server found at startup or at the last reload, with its fields, example values, and whether it is enabled. `POST /api/reload` with `{}` rescans `tiles/` and returns what loaded and what was skipped (see [tiles.md](tiles.md#reloading)). Catalog tiles use the widget routes above and count toward the widget cap. See [tiles.md](tiles.md).
 
 ## Live data
 
