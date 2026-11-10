@@ -3240,8 +3240,8 @@ function startConfigurator() {
         const clean = computed(e).clean;
         return { ...clean, order: i * 10 };
       });
-      const body = { widgets, keep_managed: true };
-      if (S.layoutRevision != null) body.base_revision = S.layoutRevision;
+      // An older server has no revisions and refuses the extra keys.
+      const body = S.layoutRevision != null ? { widgets, keep_managed: true, base_revision: S.layoutRevision } : { widgets };
       await api("PUT", "/api/widgets/import", body);
       step(`Replaced board with ${widgets.length} tile${widgets.length === 1 ? "" : "s"}.`);
       if (widgets.some((x) => x.managed_by)) step("Managed tiles kept the content their bots posted. Only their layout changed.");
