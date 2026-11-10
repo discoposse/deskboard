@@ -1,0 +1,46 @@
+{
+  "id": "gruvbox",
+  "name": "Gruvbox",
+  "description": "Gruvbox dark with warm orange accents",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#282828",
+    "--ink": "#ebdbb2",
+    "--muted": "#a89984",
+    "--faint": "#665c54",
+    "--line": "rgba(235, 219, 178, 0.16)",
+    "--tile": "rgba(235, 219, 178, 0.04)",
+    "--tile-line": "rgba(235, 219, 178, 0.12)",
+    "--glow": "rgba(254, 128, 25, 0.12)",
+    "--accent": "#fe8019",
+    "--ok": "#b8bb26",
+    "--warn": "#fabd2f",
+    "--bad": "#fb4934",
+    "--radius": "6px",
+    "--gap": "24px",
+    "--border-width": "2px",
+    "--tile-radius": "6px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Autumn mesa"
+    },
+    {
+      "id": "canyon",
+      "file": "images/canyon.svg",
+      "caption": "Rust canyon"
+    },
+    {
+      "id": "forge",
+      "file": "images/forge.svg",
+      "caption": "Amber forge"
+    }
+  ]
+}

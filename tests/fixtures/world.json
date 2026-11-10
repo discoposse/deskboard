@@ -1,0 +1,10 @@
+{
+  "widgets": [
+    {"id": "clock", "type": "clock", "enabled": true, "order": 0, "style": "analog", "show_seconds": true, "show_date": true, "col_span": 1, "row_span": 1},
+    {"id": "stats", "type": "stats", "enabled": true, "order": 10, "fields": ["load", "free", "up"], "col_span": 1, "row_span": 1},
+    {"id": "world", "type": "worldclocks", "enabled": true, "order": 20, "cities": [{"label": "New York", "zone": "America/New_York"}, {"label": "London", "zone": "Europe/London"}, {"label": "Tokyo", "zone": "Asia/Tokyo"}, {"label": "UTC", "zone": "UTC"}], "style": "analog", "mark_markets": true, "col_span": 2, "row_span": 1},
+    {"id": "card", "type": "theme_card", "enabled": true, "order": 30, "image": "default", "caption": "Preset art", "col_span": 1, "row_span": 1},
+    {"id": "timer", "type": "timer", "enabled": true, "order": 40, "title": "Focus", "minutes": 25, "mode": "pomodoro", "col_span": 1, "row_span": 1},
+    {"id": "count", "type": "countdown", "enabled": true, "order": 50, "title": "Launch", "target": "2030-01-01T00:00:00Z", "label": "days left", "col_span": 1, "row_span": 1}
+  ]
+}

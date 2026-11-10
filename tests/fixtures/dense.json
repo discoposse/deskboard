@@ -1,0 +1,14 @@
+{
+  "widgets": [
+    {"id": "clock", "type": "clock", "enabled": true, "order": 0, "style": "digital", "show_seconds": true, "show_date": true, "col_span": 1, "row_span": 1},
+    {"id": "stats", "type": "stats", "enabled": true, "order": 10, "fields": ["temp", "load", "free", "up"], "col_span": 1, "row_span": 1},
+    {"id": "a", "type": "list", "enabled": true, "order": 20, "title": "Alpha", "items": ["One item that is fairly long for the tile", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"], "col_span": 1, "row_span": 1},
+    {"id": "b", "type": "list", "enabled": true, "order": 30, "title": "Bravo", "items": ["Red", "Green", "Blue", "Yellow"], "col_span": 1, "row_span": 1},
+    {"id": "c", "type": "note", "enabled": true, "order": 40, "title": "Note", "text": "A longer note that should clamp inside its tile without spilling past the viewport edge at any tested size.", "col_span": 1, "row_span": 1},
+    {"id": "d", "type": "metric", "enabled": true, "order": 50, "label": "Latency", "value": "42ms", "hint": "p95", "trend": "+1", "col_span": 1, "row_span": 1},
+    {"id": "e", "type": "metric", "enabled": true, "order": 60, "label": "Builds", "value": "98%", "hint": "week", "col_span": 1, "row_span": 1},
+    {"id": "f", "type": "markdown", "enabled": true, "order": 70, "title": "Plan", "text": "## Next\n- Ship docs\n- Check overflow\n- Rest", "col_span": 1, "row_span": 1},
+    {"id": "g", "type": "note", "enabled": true, "order": 80, "text": "Short.", "col_span": 1, "row_span": 1},
+    {"id": "h", "type": "list", "enabled": true, "order": 90, "title": "Later", "items": ["Parked idea", "Another parked idea"], "col_span": 1, "row_span": 1}
+  ]
+}

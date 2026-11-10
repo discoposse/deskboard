@@ -1,0 +1,46 @@
+{
+  "id": "paper",
+  "name": "Paper",
+  "description": "Cool paper light theme for bright desks",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "Instrument Serif",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#eef1f5",
+    "--ink": "#1a2332",
+    "--muted": "#5b667a",
+    "--faint": "#8b95a8",
+    "--line": "rgba(26, 35, 50, 0.12)",
+    "--tile": "rgba(26, 35, 50, 0.03)",
+    "--tile-line": "rgba(26, 35, 50, 0.08)",
+    "--glow": "rgba(47, 111, 237, 0.08)",
+    "--accent": "#2f6fed",
+    "--ok": "#2f9e6b",
+    "--warn": "#c48a1a",
+    "--bad": "#c24545",
+    "--radius": "16px",
+    "--gap": "20px",
+    "--border-width": "1px",
+    "--tile-radius": "16px"
+  },
+  "tiling": false,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Cool sheet"
+    },
+    {
+      "id": "folds",
+      "file": "images/folds.svg",
+      "caption": "Paper folds"
+    },
+    {
+      "id": "inkwash",
+      "file": "images/inkwash.svg",
+      "caption": "Ink wash"
+    }
+  ]
+}

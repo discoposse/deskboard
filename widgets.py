@@ -1,0 +1,775 @@
+"""Stored widgets for the desk display.
+
+The HTTP layer decides who may call these functions. This module checks
+the document shape and writes widgets.json atomically.
+"""
+
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import secrets
+from pathlib import Path
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from deskboard_config import ROOT, load_config
+
+PATH = Path(os.environ["DESKBOARD_WIDGETS"]) if os.environ.get("DESKBOARD_WIDGETS") else ROOT / "widgets.json"
+LOCK = PATH.with_name(PATH.name + ".lock")
+ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+RESERVED_IDS = {"order"}
+DEFAULT_MAX_WIDGETS = 16
+STAT_FIELDS = ("temp", "load", "free", "up")
+SPAN_VALUES = (1, 2)
+
+TYPES = (
+    "clock",
+    "worldclocks",
+    "stats",
+    "note",
+    "markdown",
+    "metric",
+    "list",
+    "weather",
+    "countdown",
+    "calendar",
+    "github",
+    "embed",
+    "rss",
+    "image",
+    "timer",
+    "status",
+    "theme_card",
+)
+SINGLETONS = {"clock", "stats", "worldclocks"}
+TYPE_FIELDS = {
+    "clock": {"style", "show_seconds", "show_date"},
+    "worldclocks": {"cities", "style", "mark_markets"},
+    "stats": {"fields"},
+    "note": {"title", "text"},
+    "markdown": {"title", "text"},
+    "metric": {"label", "value", "hint", "trend"},
+    "list": {"title", "items"},
+    "weather": {"latitude", "longitude", "label", "units"},
+    "countdown": {"title", "target", "label"},
+    "calendar": {"title", "url", "limit"},
+    "github": {"repos", "title"},
+    "embed": {"url", "title", "refresh_sec"},
+    "rss": {"url", "title", "limit"},
+    "image": {"src", "title", "fit"},
+    "timer": {"title", "minutes", "mode"},
+    "status": {"title", "targets"},
+    "theme_card": {"image", "caption"},
+}
+COMMON_FIELDS = {"id", "type", "enabled", "order", "col_span", "row_span"}
+OUTPUT_KEYS = (
+    "id",
+    "type",
+    "enabled",
+    "order",
+    "col_span",
+    "row_span",
+    "title",
+    "text",
+    "label",
+    "value",
+    "hint",
+    "trend",
+    "items",
+    "fields",
+    "style",
+    "show_seconds",
+    "show_date",
+    "cities",
+    "mark_markets",
+    "latitude",
+    "longitude",
+    "units",
+    "target",
+    "url",
+    "limit",
+    "repos",
+    "refresh_sec",
+    "src",
+    "fit",
+    "minutes",
+    "mode",
+    "targets",
+    "image",
+    "caption",
+)
+
+DEFAULT_WIDGETS = [
+    {"id": "clock", "type": "clock", "enabled": True, "order": 0, "style": "digital", "show_seconds": True, "show_date": True},
+    {
+        "id": "stats",
+        "type": "stats",
+        "enabled": True,
+        "order": 10,
+        "fields": ["temp", "load", "free", "up"],
+    },
+]
+
+
+class WidgetError(Exception):
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def max_widgets() -> int:
+    return int(load_config().get("max_widgets") or DEFAULT_MAX_WIDGETS)
+
+
+def list_widgets() -> list[dict]:
+    def run():
+        widgets, dirty = _read()
+        widgets.sort(key=_sort_key)
+        if dirty:
+            _save(widgets)
+        return widgets
+
+    return _transaction(run)
+
+
+def get_widget(widget_id: str) -> dict:
+    for widget in list_widgets():
+        if widget["id"] == widget_id:
+            return widget
+    raise WidgetError("widget not found", 404)
+
+
+def create_widget(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise WidgetError("body must be an object")
+    widget_type = data.get("type")
+    if widget_type not in TYPES:
+        raise WidgetError("type must be one of: " + ", ".join(TYPES))
+    _reject_unknown(data, TYPE_FIELDS[widget_type] | COMMON_FIELDS)
+
+    def run():
+        widgets, _dirty = _read()
+        limit = max_widgets()
+        if len(widgets) >= limit:
+            raise WidgetError(f"a screen holds up to {limit} widgets", 409)
+        if widget_type in SINGLETONS and any(item["type"] == widget_type for item in widgets):
+            raise WidgetError(f"{widget_type} already exists", 409)
+        widget_id = _choose_id(data.get("id"), widgets)
+        order = _order_value(data.get("order"), widgets)
+        widget = _build(widget_type, data, widget_id, order, previous=None)
+        widgets.append(widget)
+        widgets.sort(key=_sort_key)
+        _save(widgets)
+        return widget
+
+    return _transaction(run)
+
+
+def update_widget(widget_id: str, data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise WidgetError("body must be an object")
+    if not data:
+        raise WidgetError("body must change at least one field")
+
+    def run():
+        widgets, _dirty = _read()
+        current = next((item for item in widgets if item["id"] == widget_id), None)
+        if current is None:
+            raise WidgetError("widget not found", 404)
+        _reject_unknown(data, TYPE_FIELDS[current["type"]] | {"enabled", "order", "col_span", "row_span"})
+        order = current["order"] if "order" not in data else _require_order(data["order"])
+        widget = _build(current["type"], data, widget_id, order, previous=current)
+        widgets = [widget if item["id"] == widget_id else item for item in widgets]
+        widgets.sort(key=_sort_key)
+        _save(widgets)
+        return widget
+
+    return _transaction(run)
+
+
+def delete_widget(widget_id: str) -> None:
+    def run():
+        widgets, _dirty = _read()
+        if not any(item["id"] == widget_id for item in widgets):
+            raise WidgetError("widget not found", 404)
+        _save([item for item in widgets if item["id"] != widget_id])
+
+    _transaction(run)
+
+
+def reorder_widgets(ids: list) -> list[dict]:
+    if not isinstance(ids, list) or any(not isinstance(item, str) for item in ids):
+        raise WidgetError("ids must be a list of widget ids")
+
+    def run():
+        widgets, _dirty = _read()
+        current = sorted(widgets, key=_sort_key)
+        current_ids = [item["id"] for item in current]
+        if len(ids) != len(set(ids)) or sorted(ids) != sorted(current_ids):
+            raise WidgetError("ids must list every widget once")
+        by_id = {item["id"]: item for item in current}
+        ordered = []
+        for index, widget_id in enumerate(ids):
+            widget = dict(by_id[widget_id])
+            widget["order"] = index * 10
+            ordered.append(_present(widget))
+        _save(ordered)
+        return ordered
+
+    return _transaction(run)
+
+
+def replace_widgets(docs: list) -> list[dict]:
+    if not isinstance(docs, list):
+        raise WidgetError("widgets must be a list")
+    limit = max_widgets()
+    if len(docs) > limit:
+        raise WidgetError(f"a screen holds up to {limit} widgets", 409)
+
+    def run():
+        built = []
+        seen = set()
+        for index, item in enumerate(docs):
+            if not isinstance(item, dict):
+                raise WidgetError("each widget must be an object")
+            widget_type = item.get("type")
+            if widget_type not in TYPES:
+                raise WidgetError("type must be one of: " + ", ".join(TYPES))
+            _reject_unknown(item, TYPE_FIELDS[widget_type] | COMMON_FIELDS)
+            widget_id = item.get("id")
+            if not isinstance(widget_id, str) or widget_id in RESERVED_IDS or not ID_RE.match(widget_id):
+                raise WidgetError("id must be a short lowercase name")
+            if widget_id in seen:
+                raise WidgetError(f"duplicate id {widget_id}", 409)
+            seen.add(widget_id)
+            if widget_type in SINGLETONS and any(w["type"] == widget_type for w in built):
+                raise WidgetError(f"{widget_type} already exists", 409)
+            order = item.get("order")
+            if order is None:
+                order = index * 10
+            built.append(_build(widget_type, item, widget_id, _require_order(order), previous=None))
+        built.sort(key=_sort_key)
+        _save(built)
+        return built
+
+    return _transaction(run)
+
+
+def _choose_id(requested, widgets: list[dict]) -> str:
+    taken = {item["id"] for item in widgets}
+    if requested is None:
+        for _ in range(8):
+            widget_id = "w" + secrets.token_hex(3)
+            if widget_id not in taken:
+                return widget_id
+        raise WidgetError("could not allocate an id", 500)
+    if not isinstance(requested, str) or requested in RESERVED_IDS or not ID_RE.match(requested):
+        raise WidgetError("id must be a short lowercase name")
+    if requested in taken:
+        raise WidgetError("id already exists", 409)
+    return requested
+
+
+def _order_value(requested, widgets: list[dict]) -> int:
+    if requested is None:
+        return max((item["order"] for item in widgets), default=-10) + 10
+    return _require_order(requested)
+
+
+def _require_order(value) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not -100000 <= value <= 100000:
+        raise WidgetError("order must be an integer")
+    return value
+
+
+def _span(data: dict, previous: dict | None, field: str) -> int:
+    if field not in data:
+        if previous is None:
+            return 1
+        return int(previous.get(field, 1))
+    value = data[field]
+    if isinstance(value, bool) or not isinstance(value, int) or value not in SPAN_VALUES:
+        raise WidgetError(f"{field} must be 1 or 2")
+    return value
+
+
+def _build(widget_type: str, data: dict, widget_id: str, order: int, previous: dict | None) -> dict:
+    enabled = _enabled(data, previous)
+    widget = {
+        "id": widget_id,
+        "type": widget_type,
+        "enabled": enabled,
+        "order": order,
+        "col_span": _span(data, previous, "col_span"),
+        "row_span": _span(data, previous, "row_span"),
+    }
+    builders = {
+        "clock": _build_clock,
+        "worldclocks": _build_worldclocks,
+        "stats": _build_stats,
+        "note": _build_note,
+        "markdown": _build_markdown,
+        "metric": _build_metric,
+        "list": _build_list,
+        "weather": _build_weather,
+        "countdown": _build_countdown,
+        "calendar": _build_calendar,
+        "github": _build_github,
+        "embed": _build_embed,
+        "rss": _build_rss,
+        "image": _build_image,
+        "timer": _build_timer,
+        "status": _build_status,
+        "theme_card": _build_theme_card,
+    }
+    builders[widget_type](widget, data, previous)
+    return _present(widget)
+
+
+def _build_clock(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["style"] = _choice(data, previous, "style", ("digital", "analog"), "digital")
+    widget["show_seconds"] = _bool(data, previous, "show_seconds", True)
+    widget["show_date"] = _bool(data, previous, "show_date", True)
+
+
+def _build_worldclocks(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["style"] = _choice(data, previous, "style", ("analog", "digital", "both"), "analog")
+    widget["mark_markets"] = _bool(data, previous, "mark_markets", False)
+    if "cities" in data or previous is None:
+        widget["cities"] = _cities(data.get("cities"))
+    else:
+        widget["cities"] = list(previous["cities"])
+
+
+def _build_stats(widget: dict, data: dict, previous: dict | None) -> None:
+    raw = data["fields"] if "fields" in data else None
+    if raw is None and previous is not None:
+        raw = previous["fields"]
+    if raw is None:
+        raw = list(STAT_FIELDS)
+    widget["fields"] = _stat_fields(raw)
+
+
+def _build_note(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["text"] = _required_text(data, previous, "text", 280, newlines=True)
+
+
+def _build_markdown(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["text"] = _required_text(data, previous, "text", 1200, newlines=True, max_lines=40)
+
+
+def _build_metric(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["label"] = _required_text(data, previous, "label", 24, newlines=False)
+    widget["value"] = _required_text(data, previous, "value", 24, newlines=False)
+    widget["hint"] = _optional_text(data, previous, "hint", 48)
+    widget["trend"] = _optional_text(data, previous, "trend", 24)
+
+
+def _build_list(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    if "items" in data or previous is None:
+        widget["items"] = _items(data.get("items"))
+    else:
+        widget["items"] = list(previous["items"])
+
+
+def _build_weather(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["latitude"] = _coord(data, previous, "latitude", -90, 90)
+    widget["longitude"] = _coord(data, previous, "longitude", -180, 180)
+    widget["label"] = _optional_text(data, previous, "label", 48)
+    widget["units"] = _choice(data, previous, "units", ("metric", "imperial"), "metric")
+
+
+def _build_countdown(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["label"] = _optional_text(data, previous, "label", 48)
+    widget["target"] = _iso_datetime(data, previous, "target")
+
+
+def _build_calendar(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["url"] = _http_url(data, previous, "url")
+    widget["limit"] = _int_range(data, previous, "limit", 1, 12, 5)
+
+
+def _build_github(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    if "repos" in data or previous is None:
+        widget["repos"] = _repos(data.get("repos"))
+    else:
+        widget["repos"] = list(previous["repos"])
+
+
+def _build_embed(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["url"] = _http_url(data, previous, "url")
+    widget["refresh_sec"] = _int_range(data, previous, "refresh_sec", 30, 86400, 300)
+    _check_embed_allowlist(widget["url"])
+
+
+def _build_rss(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["url"] = _http_url(data, previous, "url")
+    widget["limit"] = _int_range(data, previous, "limit", 1, 12, 6)
+
+
+def _build_image(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["src"] = _image_src(data, previous, "src")
+    widget["fit"] = _choice(data, previous, "fit", ("cover", "contain"), "cover")
+
+
+def _build_timer(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    widget["minutes"] = _int_range(data, previous, "minutes", 1, 180, 25)
+    widget["mode"] = _choice(data, previous, "mode", ("pomodoro", "countdown"), "pomodoro")
+
+
+def _build_status(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["title"] = _optional_text(data, previous, "title", 48)
+    if "targets" in data or previous is None:
+        widget["targets"] = _targets(data.get("targets"))
+    else:
+        widget["targets"] = list(previous["targets"])
+
+
+def _build_theme_card(widget: dict, data: dict, previous: dict | None) -> None:
+    widget["image"] = _optional_text(data, previous, "image", 64) or "default"
+    if "/" in widget["image"] or "\\" in widget["image"] or ".." in widget["image"]:
+        raise WidgetError("image must be a preset name")
+    widget["caption"] = _optional_text(data, previous, "caption", 64)
+
+
+def _enabled(data: dict, previous: dict | None) -> bool:
+    if "enabled" not in data:
+        return True if previous is None else previous["enabled"]
+    if not isinstance(data["enabled"], bool):
+        raise WidgetError("enabled must be true or false")
+    return data["enabled"]
+
+
+def _bool(data: dict, previous: dict | None, field: str, default: bool) -> bool:
+    if field not in data:
+        if previous is None:
+            return default
+        return bool(previous.get(field, default))
+    if not isinstance(data[field], bool):
+        raise WidgetError(f"{field} must be true or false")
+    return data[field]
+
+
+def _choice(data: dict, previous: dict | None, field: str, allowed: tuple[str, ...], default: str) -> str:
+    if field not in data:
+        if previous is None:
+            return default
+        value = previous.get(field, default)
+        return value if value in allowed else default
+    value = data[field]
+    if not isinstance(value, str) or value not in allowed:
+        raise WidgetError(f"{field} must be one of: {', '.join(allowed)}")
+    return value
+
+
+def _optional_text(data: dict, previous: dict | None, field: str, limit: int) -> str:
+    if field not in data:
+        if previous is None:
+            return ""
+        return previous.get(field, "")
+    return _line(data.get(field), field, limit, required=False)
+
+
+def _required_text(data, previous, field: str, limit: int, newlines: bool, max_lines: int = 4) -> str:
+    if field not in data:
+        if previous is None:
+            raise WidgetError(f"{field} is required")
+        return previous[field]
+    if newlines:
+        return _block(data.get(field), field, limit, max_lines=max_lines)
+    return _line(data.get(field), field, limit, required=True)
+
+
+def _line(value, field: str, limit: int, required: bool) -> str:
+    if value is None and not required:
+        return ""
+    if not isinstance(value, str) or "\n" in value or "\r" in value:
+        raise WidgetError(f"{field} must be a single line")
+    if _has_control(value):
+        raise WidgetError(f"{field} has unsupported characters")
+    cleaned = value.strip()
+    if required and not cleaned:
+        raise WidgetError(f"{field} is required")
+    if len(cleaned) > limit:
+        raise WidgetError(f"{field} is limited to {limit} characters")
+    return cleaned
+
+
+def _block(value, field: str, limit: int, max_lines: int = 4) -> str:
+    if not isinstance(value, str):
+        raise WidgetError(f"{field} must be a string")
+    cleaned = value.replace("\r\n", "\n").replace("\r", "\n")
+    if _has_control(cleaned):
+        raise WidgetError(f"{field} has unsupported characters")
+    lines = [line.rstrip() for line in cleaned.split("\n")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not any(line.strip() for line in lines):
+        raise WidgetError(f"{field} is required")
+    if len(lines) > max_lines:
+        raise WidgetError(f"{field} is limited to {max_lines} lines")
+    text = "\n".join(lines)
+    if len(text) > limit:
+        raise WidgetError(f"{field} is limited to {limit} characters")
+    return text
+
+
+def _items(value) -> list[str]:
+    if not isinstance(value, list):
+        raise WidgetError("items must be a list")
+    if not 1 <= len(value) <= 8:
+        raise WidgetError("items must contain 1 to 8 lines")
+    return [_line(item, "items", 80, required=True) for item in value]
+
+
+def _stat_fields(value) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise WidgetError("fields must list one or more of temp, load, free, up")
+    if any(not isinstance(item, str) for item in value):
+        raise WidgetError("fields must be strings")
+    if len(value) != len(set(value)) or any(item not in STAT_FIELDS for item in value):
+        raise WidgetError("fields must be temp, load, free, or up, without repeats")
+    return list(value)
+
+
+def _cities(value) -> list[dict]:
+    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+        raise WidgetError("cities must list 1 to 8 cities")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise WidgetError("each city must be an object with label and zone")
+        extra = sorted(set(item) - {"label", "zone"})
+        if extra:
+            raise WidgetError("unknown city fields: " + ", ".join(extra))
+        label = _line(item.get("label"), "label", 24, required=True)
+        zone = _line(item.get("zone"), "zone", 64, required=True)
+        try:
+            ZoneInfo(zone)
+        except ZoneInfoNotFoundError as exc:
+            raise WidgetError(f"unknown timezone {zone}") from exc
+        out.append({"label": label, "zone": zone})
+    return out
+
+
+def _coord(data: dict, previous: dict | None, field: str, lo: float, hi: float) -> float:
+    if field not in data:
+        if previous is None:
+            raise WidgetError(f"{field} is required")
+        return float(previous[field])
+    value = data[field]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise WidgetError(f"{field} must be a number")
+    number = float(value)
+    if not lo <= number <= hi:
+        raise WidgetError(f"{field} must be between {lo} and {hi}")
+    return round(number, 4)
+
+
+def _iso_datetime(data: dict, previous: dict | None, field: str) -> str:
+    if field not in data:
+        if previous is None:
+            raise WidgetError(f"{field} is required")
+        return previous[field]
+    value = data[field]
+    if not isinstance(value, str):
+        raise WidgetError(f"{field} must be an ISO date or datetime string")
+    cleaned = value.strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?$", cleaned):
+        raise WidgetError(f"{field} must look like 2026-12-31 or 2026-12-31T18:00:00")
+    if len(cleaned) > 40:
+        raise WidgetError(f"{field} is too long")
+    return cleaned
+
+
+def _http_url(data: dict, previous: dict | None, field: str) -> str:
+    if field not in data:
+        if previous is None:
+            raise WidgetError(f"{field} is required")
+        return previous[field]
+    value = data[field]
+    if not isinstance(value, str):
+        raise WidgetError(f"{field} must be a URL")
+    cleaned = value.strip()
+    parsed = urlparse(cleaned)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise WidgetError(f"{field} must be an http or https URL")
+    if len(cleaned) > 500:
+        raise WidgetError(f"{field} is limited to 500 characters")
+    if _has_control(cleaned):
+        raise WidgetError(f"{field} has unsupported characters")
+    return cleaned
+
+
+def _check_embed_allowlist(url: str) -> None:
+    allow = load_config().get("embed_allowlist") or []
+    if not allow:
+        raise WidgetError("embed_allowlist is empty; add the host in config before creating an embed tile")
+    host = urlparse(url).hostname or ""
+    host = host.lower()
+    for entry in allow:
+        entry = entry.lower()
+        if host == entry or host.endswith("." + entry):
+            return
+    raise WidgetError(f"host {host} is not on embed_allowlist")
+
+
+def _repos(value) -> list[str]:
+    if not isinstance(value, list) or not 1 <= len(value) <= 6:
+        raise WidgetError("repos must list 1 to 6 owner/name strings")
+    out = []
+    for item in value:
+        if not isinstance(item, str):
+            raise WidgetError("each repo must be a string like owner/name")
+        cleaned = item.strip()
+        if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", cleaned):
+            raise WidgetError("each repo must look like owner/name")
+        out.append(cleaned)
+    return out
+
+
+def _image_src(data: dict, previous: dict | None, field: str) -> str:
+    if field not in data:
+        if previous is None:
+            raise WidgetError(f"{field} is required")
+        return previous[field]
+    value = data[field]
+    if not isinstance(value, str):
+        raise WidgetError(f"{field} must be a string")
+    cleaned = value.strip()
+    if cleaned.startswith("/media/") or cleaned.startswith("/themes/"):
+        if ".." in cleaned or len(cleaned) > 200:
+            raise WidgetError(f"{field} path is invalid")
+        return cleaned
+    parsed = urlparse(cleaned)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        if len(cleaned) > 500:
+            raise WidgetError(f"{field} is limited to 500 characters")
+        return cleaned
+    raise WidgetError(f"{field} must be /media/..., /themes/..., or an http(s) URL")
+
+
+def _targets(value) -> list[dict]:
+    if not isinstance(value, list) or not 1 <= len(value) <= 8:
+        raise WidgetError("targets must list 1 to 8 entries")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise WidgetError("each target must be an object with label and url")
+        extra = sorted(set(item) - {"label", "url"})
+        if extra:
+            raise WidgetError("unknown target fields: " + ", ".join(extra))
+        label = _line(item.get("label"), "label", 24, required=True)
+        url = item.get("url")
+        if not isinstance(url, str):
+            raise WidgetError("url must be a string")
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise WidgetError("url must be an http or https URL")
+        cleaned = url.strip()
+        if len(cleaned) > 300:
+            raise WidgetError("url is limited to 300 characters")
+        out.append({"label": label, "url": cleaned})
+    return out
+
+
+def _int_range(data: dict, previous: dict | None, field: str, lo: int, hi: int, default: int) -> int:
+    if field not in data:
+        if previous is None:
+            return default
+        return int(previous.get(field, default))
+    value = data[field]
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise WidgetError(f"{field} must be an integer from {lo} to {hi}")
+    return value
+
+
+def _has_control(value: str) -> bool:
+    return any(ord(char) < 32 and char != "\n" for char in value)
+
+
+def _reject_unknown(data: dict, allowed: set[str]) -> None:
+    extra = sorted(set(data) - allowed)
+    if extra:
+        raise WidgetError("unknown fields: " + ", ".join(extra))
+
+
+def _sort_key(widget: dict) -> tuple:
+    return (widget["order"], widget["id"])
+
+
+def _present(widget: dict) -> dict:
+    return {key: widget[key] for key in OUTPUT_KEYS if key in widget}
+
+
+def _default_widgets() -> list[dict]:
+    widgets = []
+    for item in DEFAULT_WIDGETS:
+        widgets.append(_build(item["type"], item, item["id"], item["order"], previous=None))
+    return widgets
+
+
+def _read() -> tuple[list[dict], bool]:
+    if not PATH.exists():
+        return _default_widgets(), True
+    try:
+        raw = json.loads(PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise WidgetError(f"widgets.json could not be parsed: {exc}", 500) from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("widgets"), list):
+        raise WidgetError("widgets.json is missing a widgets list", 500)
+    widgets = []
+    seen = set()
+    for item in raw["widgets"]:
+        if not isinstance(item, dict):
+            raise WidgetError("widgets.json has an invalid widget", 500)
+        try:
+            widget_id = item["id"]
+            widget_type = item["type"]
+            order = item["order"]
+        except KeyError as exc:
+            raise WidgetError("widgets.json has an invalid widget", 500) from exc
+        if not isinstance(widget_id, str) or widget_id in seen or not ID_RE.match(widget_id):
+            raise WidgetError("widgets.json has an invalid widget id", 500)
+        if widget_type not in TYPES:
+            raise WidgetError("widgets.json has an invalid widget", 500)
+        seen.add(widget_id)
+        allowed = TYPE_FIELDS[widget_type] | COMMON_FIELDS
+        kept = {key: item[key] for key in allowed if key in item}
+        try:
+            widgets.append(_build(widget_type, kept, widget_id, _require_order(order), previous=None))
+        except WidgetError as exc:
+            raise WidgetError(f"widgets.json has an invalid widget: {exc}", 500) from exc
+    return widgets, False
+
+
+def _save(widgets: list[dict]) -> None:
+    payload = {"widgets": [_present(widget) for widget in widgets]}
+    temporary = PATH.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(temporary, PATH)
+
+
+def _transaction(fn):
+    LOCK.touch(exist_ok=True)
+    with LOCK.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            return fn()
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

@@ -1,0 +1,8 @@
+{
+  "widgets": [
+    {"id": "stats", "type": "stats", "enabled": true, "order": 10, "fields": ["load", "free"], "col_span": 1, "row_span": 1},
+    {"id": "focus", "type": "note", "enabled": true, "order": 20, "title": "Focus", "text": "No hero clock on this board.", "col_span": 2, "row_span": 1},
+    {"id": "today", "type": "list", "enabled": true, "order": 30, "title": "Today", "items": ["Tile A", "Tile B", "Tile C"], "col_span": 1, "row_span": 1},
+    {"id": "metric1", "type": "metric", "enabled": true, "order": 40, "label": "Tasks", "value": "3", "col_span": 1, "row_span": 1}
+  ]
+}

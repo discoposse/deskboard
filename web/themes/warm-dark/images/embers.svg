@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" role="img" aria-label="Soft abstract shapes">
+  <defs>
+    <radialGradient id="orb1" cx="30%" cy="35%" r="40%">
+      <stop offset="0%" stop-color="#c4a574" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#c4a574" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="orb2" cx="75%" cy="55%" r="35%">
+      <stop offset="0%" stop-color="#7fb08a" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#7fb08a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wash" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c1d18"/>
+      <stop offset="100%" stop-color="#10110e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" fill="url(#wash)"/>
+  <rect width="1600" height="900" fill="url(#orb1)"/>
+  <rect width="1600" height="900" fill="url(#orb2)"/>
+  <g fill="none" stroke="#f2efe7" stroke-opacity="0.1" stroke-width="1.5">
+    <rect x="180" y="140" width="420" height="280" rx="12"/>
+    <rect x="640" y="200" width="360" height="420" rx="12"/>
+    <rect x="1040" y="120" width="380" height="520" rx="12"/>
+  </g>
+  <g fill="#c4a574" opacity="0.22">
+    <rect x="210" y="180" width="160" height="8" rx="4"/>
+    <rect x="680" y="250" width="120" height="8" rx="4"/>
+    <rect x="1080" y="170" width="180" height="8" rx="4"/>
+  </g>
+  <ellipse cx="420" cy="700" rx="260" ry="70" fill="#d9b36c" opacity="0.12"/>
+  <ellipse cx="1100" cy="760" rx="320" ry="50" fill="#7fb08a" opacity="0.1"/>
+  <path d="M200 620 C480 540 700 700 980 580 C1200 490 1400 610 1500 560" fill="none" stroke="#c4a574" stroke-width="3" opacity="0.28"/>
+</svg>

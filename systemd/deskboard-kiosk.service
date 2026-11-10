@@ -1,0 +1,35 @@
+[Unit]
+Description=Deskboard kiosk on HDMI
+After=systemd-user-sessions.service systemd-logind.service deskboard.service
+Wants=deskboard.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+StartLimitIntervalSec=0
+
+[Service]
+User=__DESKBOARD_USER__
+Group=__DESKBOARD_USER__
+SupplementaryGroups=video render input tty
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+UnsetEnvironment=TERM
+WorkingDirectory=__DESKBOARD_HOME__
+Environment=GDK_BACKEND=wayland
+Environment=WEBKIT_DISABLE_DMABUF_RENDERER=1
+Environment=WEBKIT_DISABLE_COMPOSITING_MODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/usr/bin/python3 __DESKBOARD_HOME__/wait_ready.py
+ExecStart=/usr/bin/cage -d -s -- /usr/bin/python3 -u __DESKBOARD_HOME__/kiosk.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

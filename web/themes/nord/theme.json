@@ -1,0 +1,46 @@
+{
+  "id": "nord",
+  "name": "Nord",
+  "description": "Nord frost palette with cool cyan accents",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#2e3440",
+    "--ink": "#eceff4",
+    "--muted": "#d8dee9",
+    "--faint": "#4c566a",
+    "--line": "rgba(236, 239, 244, 0.16)",
+    "--tile": "rgba(236, 239, 244, 0.04)",
+    "--tile-line": "rgba(236, 239, 244, 0.12)",
+    "--glow": "rgba(136, 192, 208, 0.14)",
+    "--accent": "#88c0d0",
+    "--ok": "#a3be8c",
+    "--warn": "#ebcb8b",
+    "--bad": "#bf616a",
+    "--radius": "6px",
+    "--gap": "24px",
+    "--border-width": "2px",
+    "--tile-radius": "6px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Polar dawn"
+    },
+    {
+      "id": "fjord",
+      "file": "images/fjord.svg",
+      "caption": "Fjord glass"
+    },
+    {
+      "id": "aurora",
+      "file": "images/aurora.svg",
+      "caption": "Quiet aurora"
+    }
+  ]
+}

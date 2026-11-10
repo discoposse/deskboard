@@ -1,0 +1,15 @@
+{
+  "mark": "DESK",
+  "timezone": "UTC",
+  "port": 8730,
+  "night_dim": true,
+  "night_start": 22,
+  "night_end": 7,
+  "theme": "warm-dark",
+  "max_widgets": 16,
+  "embed_allowlist": [],
+  "bind_tailscale": false,
+  "extra_bind": [],
+  "grid_cols": 4,
+  "grid_rows": 3
+}

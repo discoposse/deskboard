@@ -1,0 +1,46 @@
+{
+  "id": "warm-dark",
+  "name": "Warm Dark",
+  "description": "Quiet warm charcoal desk look",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "Instrument Serif",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#10110e",
+    "--ink": "#f2efe7",
+    "--muted": "#a39e92",
+    "--faint": "#6e695f",
+    "--line": "rgba(242, 239, 231, 0.14)",
+    "--tile": "rgba(242, 239, 231, 0.025)",
+    "--tile-line": "rgba(242, 239, 231, 0.09)",
+    "--glow": "rgba(242, 239, 231, 0.06)",
+    "--accent": "#c4a574",
+    "--ok": "#7fb08a",
+    "--warn": "#d9b36c",
+    "--bad": "#d0705f",
+    "--radius": "18px",
+    "--gap": "20px",
+    "--border-width": "1px",
+    "--tile-radius": "18px"
+  },
+  "tiling": false,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Dusk plane"
+    },
+    {
+      "id": "ridge",
+      "file": "images/ridge.svg",
+      "caption": "Warm ridge"
+    },
+    {
+      "id": "embers",
+      "file": "images/embers.svg",
+      "caption": "Soft embers"
+    }
+  ]
+}

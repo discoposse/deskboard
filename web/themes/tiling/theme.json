@@ -1,0 +1,46 @@
+{
+  "id": "tiling",
+  "name": "Tiling",
+  "description": "Tiling-window desk look with crisp borders and gaps",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#0d1117",
+    "--ink": "#e6edf3",
+    "--muted": "#8b949e",
+    "--faint": "#484f58",
+    "--line": "rgba(230, 237, 243, 0.18)",
+    "--tile": "rgba(230, 237, 243, 0.035)",
+    "--tile-line": "rgba(230, 237, 243, 0.14)",
+    "--glow": "rgba(63, 185, 80, 0.12)",
+    "--accent": "#3fb950",
+    "--ok": "#3fb950",
+    "--warn": "#d29922",
+    "--bad": "#f85149",
+    "--radius": "4px",
+    "--gap": "28px",
+    "--border-width": "2px",
+    "--tile-radius": "4px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Tile stack"
+    },
+    {
+      "id": "panels",
+      "file": "images/panels.svg",
+      "caption": "Panel gaps"
+    },
+    {
+      "id": "signal",
+      "file": "images/signal.svg",
+      "caption": "Green signal"
+    }
+  ]
+}

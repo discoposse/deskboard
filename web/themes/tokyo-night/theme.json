@@ -1,0 +1,46 @@
+{
+  "id": "tokyo-night",
+  "name": "Tokyo Night",
+  "description": "Tokyo Night palette with monospace accents",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#1a1b26",
+    "--ink": "#c0caf5",
+    "--muted": "#565f89",
+    "--faint": "#414868",
+    "--line": "rgba(192, 202, 245, 0.16)",
+    "--tile": "rgba(192, 202, 245, 0.04)",
+    "--tile-line": "rgba(192, 202, 245, 0.12)",
+    "--glow": "rgba(122, 162, 247, 0.12)",
+    "--accent": "#7aa2f7",
+    "--ok": "#9ece6a",
+    "--warn": "#e0af68",
+    "--bad": "#f7768e",
+    "--radius": "6px",
+    "--gap": "24px",
+    "--border-width": "2px",
+    "--tile-radius": "6px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Neon harbor"
+    },
+    {
+      "id": "grid",
+      "file": "images/grid.svg",
+      "caption": "Night grid"
+    },
+    {
+      "id": "horizon",
+      "file": "images/horizon.svg",
+      "caption": "Blue horizon"
+    }
+  ]
+}

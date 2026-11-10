@@ -1,0 +1,46 @@
+{
+  "id": "rose-pine",
+  "name": "Rose Pine",
+  "description": "Rose Pine dusk with muted rose accents",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#191724",
+    "--ink": "#e0def4",
+    "--muted": "#908caa",
+    "--faint": "#6e6a86",
+    "--line": "rgba(224, 222, 244, 0.16)",
+    "--tile": "rgba(224, 222, 244, 0.04)",
+    "--tile-line": "rgba(224, 222, 244, 0.12)",
+    "--glow": "rgba(235, 188, 186, 0.12)",
+    "--accent": "#ebbcba",
+    "--ok": "#9ccfd8",
+    "--warn": "#f6c177",
+    "--bad": "#eb6f92",
+    "--radius": "8px",
+    "--gap": "22px",
+    "--border-width": "2px",
+    "--tile-radius": "8px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Moon garden"
+    },
+    {
+      "id": "petal",
+      "file": "images/petal.svg",
+      "caption": "Petal mist"
+    },
+    {
+      "id": "dusk",
+      "file": "images/dusk.svg",
+      "caption": "Pine dusk"
+    }
+  ]
+}

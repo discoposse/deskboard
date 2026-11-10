@@ -1,0 +1,85 @@
+{
+  "widgets": [
+    {
+      "id": "clock",
+      "type": "clock",
+      "enabled": true,
+      "order": 0,
+      "style": "digital",
+      "show_seconds": true,
+      "show_date": true,
+      "col_span": 1,
+      "row_span": 1
+    },
+    {
+      "id": "stats",
+      "type": "stats",
+      "enabled": true,
+      "order": 10,
+      "fields": ["temp", "load", "free", "up"],
+      "col_span": 1,
+      "row_span": 1
+    },
+    {
+      "id": "world",
+      "type": "worldclocks",
+      "enabled": true,
+      "order": 20,
+      "cities": [
+        {"label": "New York", "zone": "America/New_York"},
+        {"label": "London", "zone": "Europe/London"},
+        {"label": "Tokyo", "zone": "Asia/Tokyo"}
+      ],
+      "style": "analog",
+      "mark_markets": true,
+      "col_span": 2,
+      "row_span": 1
+    },
+    {
+      "id": "focus",
+      "type": "note",
+      "enabled": true,
+      "order": 30,
+      "title": "Focus",
+      "text": "Ship the community repo. Keep the board readable.",
+      "col_span": 1,
+      "row_span": 1
+    },
+    {
+      "id": "today",
+      "type": "list",
+      "enabled": true,
+      "order": 40,
+      "title": "Today",
+      "items": [
+        "Review pull requests",
+        "Update the theme gallery",
+        "Walk the overflow checks"
+      ],
+      "col_span": 1,
+      "row_span": 1
+    },
+    {
+      "id": "metric1",
+      "type": "metric",
+      "enabled": true,
+      "order": 50,
+      "label": "Open issues",
+      "value": "12",
+      "hint": "deskboard",
+      "trend": "-3",
+      "col_span": 1,
+      "row_span": 1
+    },
+    {
+      "id": "themeart",
+      "type": "theme_card",
+      "enabled": true,
+      "order": 60,
+      "image": "default",
+      "caption": "Warm dark",
+      "col_span": 1,
+      "row_span": 1
+    }
+  ]
+}

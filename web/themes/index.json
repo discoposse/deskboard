@@ -1,0 +1,13 @@
+{
+  "themes": [
+    "warm-dark",
+    "tokyo-night",
+    "catppuccin",
+    "gruvbox",
+    "nord",
+    "rose-pine",
+    "tiling",
+    "paper"
+  ],
+  "default": "warm-dark"
+}

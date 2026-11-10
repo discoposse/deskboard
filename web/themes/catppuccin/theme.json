@@ -1,0 +1,46 @@
+{
+  "id": "catppuccin",
+  "name": "Catppuccin",
+  "description": "Catppuccin Mocha with soft lavender accents",
+  "fonts": {
+    "ui": "Instrument Sans",
+    "display": "ui-monospace",
+    "mono": "ui-monospace"
+  },
+  "variables": {
+    "--bg": "#1e1e2e",
+    "--ink": "#cdd6f4",
+    "--muted": "#a6adc8",
+    "--faint": "#6c7086",
+    "--line": "rgba(205, 214, 244, 0.16)",
+    "--tile": "rgba(205, 214, 244, 0.04)",
+    "--tile-line": "rgba(205, 214, 244, 0.12)",
+    "--glow": "rgba(203, 166, 247, 0.12)",
+    "--accent": "#cba6f7",
+    "--ok": "#a6e3a1",
+    "--warn": "#f9e2af",
+    "--bad": "#f38ba8",
+    "--radius": "8px",
+    "--gap": "22px",
+    "--border-width": "2px",
+    "--tile-radius": "8px"
+  },
+  "tiling": true,
+  "images": [
+    {
+      "id": "default",
+      "file": "images/default.svg",
+      "caption": "Latte dusk"
+    },
+    {
+      "id": "mocha",
+      "file": "images/mocha.svg",
+      "caption": "Mocha hills"
+    },
+    {
+      "id": "lilac",
+      "file": "images/lilac.svg",
+      "caption": "Lilac field"
+    }
+  ]
+}

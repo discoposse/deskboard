@@ -1,0 +1,36 @@
+# Local runtime state
+config.json
+widgets.json
+widgets.json.lock
+config.json.lock
+*.pyc
+__pycache__/
+.Python
+.venv/
+venv/
+.env
+.env.*
+
+# Reference and build scratch (not part of the public tree)
+reference/
+BRIEF.md
+.build.log*
+.login.log
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Test output that should not be committed accidentally
+/tmp/
+shots/overflow-*.txt
+shots/board-*-*.png
+
+# Keep curated README shots
+!shots/README.md
+!shots/board-demo-*.png
+!shots/board-theme-*.png
