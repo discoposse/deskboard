@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -49,7 +50,7 @@ EDITABLE_KEYS = (
 
 DEFAULTS = {
     "mark": "DESK",
-    "timezone": "UTC",
+    "timezone": "auto",
     "port": 8730,
     "night_dim": True,
     "night_start": 22,
@@ -63,6 +64,153 @@ DEFAULTS = {
     "grid_rows": 3,
     "enabled_community_tiles": [],
 }
+
+
+
+# Sentinel so detect_host_timezone can tell "use the process env" from "TZ is unset".
+_TZ_ENV_UNSET = object()
+_SKIP_ZONE_NAMES = {
+    "auto",
+    "localtime",
+    "posixrules",
+    "leapseconds",
+    "iso3166.tab",
+    "zone.tab",
+    "zone1970.tab",
+    "tzdata.zi",
+    "leap-seconds.list",
+}
+
+
+def _valid_zone(name: str | None) -> str | None:
+    if not isinstance(name, str):
+        return None
+    cleaned = name.strip().strip("/")
+    if not cleaned or len(cleaned) > 64:
+        return None
+    if any(ch.isspace() or ch in "\\" for ch in cleaned) or ".." in cleaned:
+        return None
+    if cleaned.lower() in _SKIP_ZONE_NAMES:
+        return None
+    try:
+        ZoneInfo(cleaned)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return None
+    return cleaned
+
+
+def _zone_from_zoneinfo_path(target: str) -> str | None:
+    text = target.replace("\\", "/")
+    marker = "/zoneinfo/"
+    if marker not in text:
+        return None
+    return _valid_zone(text.split(marker, 1)[1])
+
+
+def _zone_from_tz_value(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.startswith(":"):
+        text = text[1:].strip()
+    if not text:
+        return None
+    normalized = text.replace("\\", "/")
+    if normalized.startswith("/") or "/zoneinfo/" in normalized:
+        return _zone_from_zoneinfo_path(normalized)
+    return _valid_zone(text)
+
+
+def _zone_from_timezone_file(path: Path) -> str | None:
+    try:
+        raw = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    return _valid_zone(raw[0])
+
+
+def _zone_from_localtime(path: Path) -> str | None:
+    try:
+        if not path.is_symlink():
+            return None
+        target = os.path.realpath(path)
+    except OSError:
+        return None
+    return _zone_from_zoneinfo_path(target)
+
+
+def _zone_from_timedatectl() -> str | None:
+    try:
+        result = subprocess.run(
+            ["timedatectl", "show", "-p", "Timezone", "--value"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _valid_zone((result.stdout or "").strip())
+
+
+def detect_host_timezone(
+    *,
+    tz_env=_TZ_ENV_UNSET,
+    timezone_path: Path | None = None,
+    localtime_path: Path | None = None,
+    run_timedatectl: bool = True,
+) -> str:
+    """Return the host IANA timezone, or UTC when it cannot be read."""
+    env = os.environ.get("TZ") if tz_env is _TZ_ENV_UNSET else tz_env
+    zone = _zone_from_tz_value(env)
+    if zone:
+        return zone
+
+    zone_file = Path("/etc/timezone") if timezone_path is None else timezone_path
+    zone = _zone_from_timezone_file(zone_file)
+    if zone:
+        return zone
+
+    link = Path("/etc/localtime") if localtime_path is None else localtime_path
+    zone = _zone_from_localtime(link)
+    if zone:
+        return zone
+
+    if run_timedatectl:
+        zone = _zone_from_timedatectl()
+        if zone:
+            return zone
+
+    # On macOS, /etc/localtime is usually a symlink into
+    # /var/db/timezone/zoneinfo. The localtime read above already covers
+    # that path, so a second pass would not find a different name.
+    if sys.platform == "darwin" and localtime_path is None:
+        zone = _zone_from_localtime(Path("/etc/localtime"))
+        if zone:
+            return zone
+
+    return "UTC"
+
+
+def resolved_timezone(cfg: dict | None = None) -> str:
+    """IANA zone the clock, calendar, and bot stamps should use."""
+    settings = cfg if cfg is not None else load_config()
+    name = settings.get("timezone")
+    if not isinstance(name, str) or not name.strip() or name.strip().lower() == "auto":
+        return detect_host_timezone()
+    name = name.strip()
+    valid = _valid_zone(name)
+    if valid:
+        return valid
+    print(
+        f"deskboard config: invalid timezone {name!r}, falling back to auto",
+        file=sys.stderr,
+    )
+    return detect_host_timezone()
 
 
 def load_config() -> dict:
@@ -139,7 +287,9 @@ def load_config() -> dict:
 
 def public_config() -> dict:
     cfg = load_config()
-    return {key: cfg[key] for key in PUBLIC_KEYS}
+    out = {key: cfg[key] for key in PUBLIC_KEYS}
+    out["timezone_resolved"] = resolved_timezone(cfg)
+    return out
 
 
 def update_config(patch: dict) -> dict:
@@ -178,7 +328,9 @@ def update_config(patch: dict) -> dict:
             if key in patch:
                 cfg[key] = _grid(patch[key], key)
         _write_config(cfg)
-        return {item: cfg[item] for item in PUBLIC_KEYS}
+        out = {item: cfg[item] for item in PUBLIC_KEYS}
+        out["timezone_resolved"] = resolved_timezone(cfg)
+        return out
 
     return _locked(run)
 
@@ -194,14 +346,16 @@ def _mark(value) -> str:
 
 def _timezone(value) -> str:
     if not isinstance(value, str):
-        raise ValueError("timezone must be an IANA name, such as America/Toronto")
+        raise ValueError("timezone must be auto or an IANA name, such as America/Toronto")
     name = value.strip()
+    if name.lower() == "auto":
+        return "auto"
     if not name or len(name) > 64 or any(char.isspace() for char in name):
-        raise ValueError("timezone must be an IANA name, such as America/Toronto")
+        raise ValueError("timezone must be auto or an IANA name, such as America/Toronto")
     try:
         ZoneInfo(name)
     except ZoneInfoNotFoundError as exc:
-        raise ValueError("timezone must be an IANA name, such as America/Toronto") from exc
+        raise ValueError("timezone must be auto or an IANA name, such as America/Toronto") from exc
     return name
 
 

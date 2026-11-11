@@ -32,9 +32,11 @@ GET    /api/github
 
 ## Config
 
-`GET /api/config` returns the public settings mark, timezone, port, night dim window, theme, max_widgets, embed_allowlist, bind_tailscale, extra_bind, grid_cols, grid_rows, enabled_community_tiles.
+`GET /api/config` returns the public settings mark, timezone, timezone_resolved, port, night dim window, theme, max_widgets, embed_allowlist, bind_tailscale, extra_bind, grid_cols, grid_rows, enabled_community_tiles.
 
-`PATCH /api/config` accepts a subset of those keys. Unknown keys are rejected. `port` and `enabled_community_tiles` are read from `config.json` only. `extra_bind` may not include `0.0.0.0` or `::`. The clock timezone is display-only. The OS timezone is never changed.
+`timezone` may be `auto` (the default, follow the host machine) or an IANA name such as `America/New_York`. `timezone_resolved` is the zone the clock, calendar, and bot stamps use. An invalid `timezone` value falls back to `auto` and the server logs a warning. Existing configs that already set an IANA name keep working.
+
+`PATCH /api/config` accepts a subset of those keys. Unknown keys are rejected. `port`, `enabled_community_tiles`, and `timezone_resolved` are not editable here. `port` and `enabled_community_tiles` are read from `config.json` only. `extra_bind` may not include `0.0.0.0` or `::`. The clock timezone is display-only. The OS timezone is never changed.
 
 ## Widgets
 

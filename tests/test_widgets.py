@@ -127,13 +127,182 @@ class WidgetTests(unittest.TestCase):
         pub = self.cfg.public_config()
         self.assertEqual(pub["mark"], "DESK")
         self.assertEqual(pub["port"], 8730)
+        self.assertEqual(pub["timezone"], "auto")
+        self.assertIn("timezone_resolved", pub)
         self.assertFalse(pub["bind_tailscale"])
         updated = self.cfg.update_config({"theme": "nord", "mark": "LAB"})
         self.assertEqual(updated["theme"], "nord")
         self.assertEqual(updated["mark"], "LAB")
 
 
+class TimezoneTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.config_path = Path(self.tmp.name) / "config.json"
+        self.widgets_path = Path(self.tmp.name) / "widgets.json"
+        self._tz = os.environ.get("TZ")
+        os.environ["DESKBOARD_CONFIG"] = str(self.config_path)
+        os.environ["DESKBOARD_WIDGETS"] = str(self.widgets_path)
+        for name in list(sys.modules):
+            if name in ("widgets", "deskboard_config", "fetches", "serve"):
+                del sys.modules[name]
+        import deskboard_config as cfg
+        import fetches
+        import widgets as w
+
+        self.cfg = cfg
+        self.fetches = fetches
+        self.w = w
+
+    def tearDown(self):
+        if self._tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self._tz
+        os.environ.pop("DESKBOARD_WIDGETS", None)
+        os.environ.pop("DESKBOARD_CONFIG", None)
+        self.tmp.cleanup()
+
+    def test_auto_resolves_from_tz_env(self):
+        os.environ["TZ"] = "America/Chicago"
+        self.config_path.write_text(json.dumps({"timezone": "auto"}), encoding="utf-8")
+        self.assertEqual(self.cfg.resolved_timezone(), "America/Chicago")
+        pub = self.cfg.public_config()
+        self.assertEqual(pub["timezone"], "auto")
+        self.assertEqual(pub["timezone_resolved"], "America/Chicago")
+
+    def test_missing_or_empty_timezone_is_auto(self):
+        os.environ["TZ"] = "Asia/Tokyo"
+        self.config_path.write_text(json.dumps({"mark": "LAB"}), encoding="utf-8")
+        self.assertEqual(self.cfg.load_config()["timezone"], "auto")
+        self.assertEqual(self.cfg.resolved_timezone(), "Asia/Tokyo")
+        self.config_path.write_text(json.dumps({"timezone": "  "}), encoding="utf-8")
+        self.assertEqual(self.cfg.resolved_timezone(), "Asia/Tokyo")
+
+    def test_explicit_iana_overrides_host(self):
+        os.environ["TZ"] = "America/Chicago"
+        self.config_path.write_text(json.dumps({"timezone": "America/New_York"}), encoding="utf-8")
+        self.assertEqual(self.cfg.resolved_timezone(), "America/New_York")
+        pub = self.cfg.public_config()
+        self.assertEqual(pub["timezone"], "America/New_York")
+        self.assertEqual(pub["timezone_resolved"], "America/New_York")
+
+    def test_invalid_timezone_falls_back_to_auto(self):
+        os.environ["TZ"] = "Europe/Paris"
+        self.config_path.write_text(json.dumps({"timezone": "Not/ARealZone"}), encoding="utf-8")
+        from contextlib import redirect_stderr
+        from io import StringIO
+
+        buf = StringIO()
+        with redirect_stderr(buf):
+            self.assertEqual(self.cfg.resolved_timezone(), "Europe/Paris")
+        log = buf.getvalue()
+        self.assertIn("Not/ARealZone", log)
+        self.assertIn("auto", log.lower())
+
+    def test_detect_order_timezone_file_then_localtime(self):
+        root = Path(self.tmp.name)
+        zone_file = root / "timezone"
+        zone_file.write_text("Europe/Berlin\n", encoding="utf-8")
+        target = root / "zoneinfo" / "Pacific" / "Auckland"
+        target.parent.mkdir(parents=True)
+        target.write_text("x", encoding="utf-8")
+        link = root / "localtime"
+        link.symlink_to(target)
+        self.assertEqual(
+            self.cfg.detect_host_timezone(
+                tz_env=None,
+                timezone_path=zone_file,
+                localtime_path=link,
+                run_timedatectl=False,
+            ),
+            "Europe/Berlin",
+        )
+        zone_file.write_text("Not/ARealZone\n", encoding="utf-8")
+        self.assertEqual(
+            self.cfg.detect_host_timezone(
+                tz_env=None,
+                timezone_path=zone_file,
+                localtime_path=link,
+                run_timedatectl=False,
+            ),
+            "Pacific/Auckland",
+        )
+
+    def test_detect_tz_env_path_and_colon_prefix(self):
+        self.assertEqual(
+            self.cfg.detect_host_timezone(
+                tz_env=":America/Denver",
+                timezone_path=Path(self.tmp.name) / "missing",
+                localtime_path=Path(self.tmp.name) / "missing",
+                run_timedatectl=False,
+            ),
+            "America/Denver",
+        )
+        self.assertEqual(
+            self.cfg.detect_host_timezone(
+                tz_env="/usr/share/zoneinfo/Europe/London",
+                timezone_path=Path(self.tmp.name) / "missing",
+                localtime_path=Path(self.tmp.name) / "missing",
+                run_timedatectl=False,
+            ),
+            "Europe/London",
+        )
+
+    def test_detect_falls_back_to_utc(self):
+        self.assertEqual(
+            self.cfg.detect_host_timezone(
+                tz_env=None,
+                timezone_path=Path(self.tmp.name) / "missing",
+                localtime_path=Path(self.tmp.name) / "missing",
+                run_timedatectl=False,
+            ),
+            "UTC",
+        )
+
+    def test_update_config_accepts_auto_and_rejects_invalid(self):
+        updated = self.cfg.update_config({"timezone": "auto"})
+        self.assertEqual(updated["timezone"], "auto")
+        self.assertIn("timezone_resolved", updated)
+        with self.assertRaises(ValueError):
+            self.cfg.update_config({"timezone": "Not/ARealZone"})
+
+    def test_calendar_times_use_board_zone(self):
+        from datetime import datetime, timezone
+
+        ics = (
+            "BEGIN:VCALENDAR\n"
+            "BEGIN:VEVENT\n"
+            "DTSTART:20261111T150000Z\n"
+            "SUMMARY:Standup\n"
+            "END:VEVENT\n"
+            "END:VCALENDAR\n"
+        )
+        now = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
+        items = self.fetches._parse_ics_upcoming(ics, limit=5, board_tz="America/New_York", now=now)
+        self.assertEqual(items, ["Wed 10:00  Standup"])
+        naive = (
+            "BEGIN:VCALENDAR\n"
+            "BEGIN:VEVENT\n"
+            "DTSTART:20261111T150000\n"
+            "SUMMARY:Local meeting\n"
+            "END:VEVENT\n"
+            "END:VCALENDAR\n"
+        )
+        items = self.fetches._parse_ics_upcoming(naive, limit=5, board_tz="America/New_York", now=now)
+        self.assertEqual(items, ["Wed 15:00  Local meeting"])
+
+    def test_stamp_uses_resolved_auto_zone(self):
+        from datetime import datetime, timezone
+
+        os.environ["TZ"] = "America/New_York"
+        self.config_path.write_text(json.dumps({"timezone": "auto"}), encoding="utf-8")
+        noon_utc = datetime(2026, 11, 10, 17, 5, tzinfo=timezone.utc)
+        self.assertEqual(self.w._clock_stamp(noon_utc), "12:05 PM")
+
+
 class ScrubTests(unittest.TestCase):
+
     # Tokens are split so this file does not contain the forbidden strings.
     FORBIDDEN = [
         "nous" + "nuc16",

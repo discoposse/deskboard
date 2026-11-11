@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from deskboard_config import load_config, public_config, update_config
+from deskboard_config import load_config, public_config, resolved_timezone, update_config
 from fetches import (
     calendar_payload,
     github_payload,
@@ -158,6 +158,7 @@ def status() -> dict:
     return {
         "mark": cfg["mark"],
         "timezone": cfg["timezone"],
+        "timezone_resolved": resolved_timezone(cfg),
         "night_dim": cfg["night_dim"],
         "night_start": cfg["night_start"],
         "night_end": cfg["night_end"],
@@ -224,7 +225,7 @@ def widget_live_data(widget: dict) -> dict:
     if widget_type == "rss":
         return rss_payload(widget["url"], int(widget.get("limit") or 6))
     if widget_type == "calendar":
-        return calendar_payload(widget["url"], int(widget.get("limit") or 5), load_config()["timezone"])
+        return calendar_payload(widget["url"], int(widget.get("limit") or 5), resolved_timezone())
     if widget_type == "status":
         return status_payload(list(widget.get("targets") or []))
     raise WidgetError(f"{widget_type} has no live data endpoint", 404)

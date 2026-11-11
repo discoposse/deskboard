@@ -11,7 +11,7 @@ This path is for a spare mini PC with one monitor. It takes over tty1 with Cage 
 ## Steps
 
 1. Copy this repo to the machine, for example `~/deskboard`.
-2. Copy `config.example.json` to `config.json` and set `timezone`, `mark`, and optional Tailscale bind.
+2. Copy `config.example.json` to `config.json` and set `mark` and optional Tailscale bind. Leave `timezone` as `auto` to follow the machine, or set an IANA name to override it.
 3. Run the installer as root, with the desk user set:
 
 ```bash
@@ -28,7 +28,7 @@ The script installs Cage, WebKitGTK bindings, writes systemd units, and enables 
 - Python changes: `sudo systemctl restart deskboard`
 - Frontend or kiosk changes: `sudo systemctl restart deskboard-kiosk`
 - Do not reboot just to test a content or CSS change.
-- Do not change the OS timezone. Set `timezone` in `config.json` for the clock display only.
+- Do not change the OS timezone. The clock follows the machine by default. Set `timezone` in `config.json` or the configurator only if you want a different display zone.
 
 ## Optional GitHub token
 

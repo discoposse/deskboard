@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any
 from urllib.parse import urlparse
 
@@ -200,7 +201,14 @@ def status_payload(targets: list[dict]) -> dict:
     return _set_cached(key, {"ok": True, "targets": results})
 
 
-def _parse_ics_upcoming(text: str, limit: int, board_tz: str) -> list[str]:
+def _board_zone(name: str):
+    try:
+        return ZoneInfo(name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def _parse_ics_upcoming(text: str, limit: int, board_tz: str, now: datetime | None = None) -> list[str]:
     # Lightweight ICS reader for VEVENT summaries in the next 14 days.
     unfolded = text.replace("\r\n", "\n").replace("\r", "\n")
     unfolded = re.sub(r"\n[ \t]", "", unfolded)
@@ -225,16 +233,19 @@ def _parse_ics_upcoming(text: str, limit: int, board_tz: str) -> list[str]:
             cur["SUMMARY"] = value.replace("\\n", " ").replace("\\,", ",").replace("\\;", ";").strip()
         elif prop == "STATUS":
             cur["STATUS"] = value.upper()
-    now = datetime.now(timezone.utc)
-    horizon = now.timestamp() + 14 * 86400
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    zone = _board_zone(board_tz)
+    horizon = moment.timestamp() + 14 * 86400
     items = []
     for ev in events:
         if ev.get("STATUS") == "CANCELLED":
             continue
-        stamp = _ics_to_epoch(ev["DTSTART"])
-        if stamp is None or stamp > horizon or stamp + 86400 < now.timestamp():
+        stamp = _ics_to_epoch(ev["DTSTART"], board_tz)
+        if stamp is None or stamp > horizon or stamp + 86400 < moment.timestamp():
             continue
-        when = datetime.fromtimestamp(stamp, tz=timezone.utc).strftime("%a %H:%M")
+        when = datetime.fromtimestamp(stamp, tz=zone).strftime("%a %H:%M")
         items.append(f"{when}  {ev['SUMMARY'][:60]}")
     items.sort()
     if not items:
@@ -242,7 +253,7 @@ def _parse_ics_upcoming(text: str, limit: int, board_tz: str) -> list[str]:
     return items[:limit]
 
 
-def _ics_to_epoch(value: str) -> float | None:
+def _ics_to_epoch(value: str, board_tz: str = "UTC") -> float | None:
     m = re.match(r"^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?(Z)?)?$", value)
     if not m:
         return None
@@ -253,7 +264,7 @@ def _ics_to_epoch(value: str) -> float | None:
     if m.group(7):
         dt = datetime(y, mo, d, hh, mm, ss, tzinfo=timezone.utc)
     else:
-        dt = datetime(y, mo, d, hh, mm, ss, tzinfo=timezone.utc)
+        dt = datetime(y, mo, d, hh, mm, ss, tzinfo=_board_zone(board_tz))
     return dt.timestamp()
 
 

@@ -24,6 +24,8 @@ Widget cap defaults to 16 and is configurable as `max_widgets`. Singletons: one 
 
 More tile types come from folders under `tiles/`. `GET /api/tiles` lists them and [tiles.md](tiles.md) covers how to add one.
 
+The clock, calendar, and bot post stamps use the board's resolved timezone. World clocks keep the IANA zone set on each city.
+
 Spans: set `col_span` and `row_span` to `1` or `2` so a tile covers more grid cells.
 
 ## Examples

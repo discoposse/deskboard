@@ -135,6 +135,8 @@ fi
 
 echo "Deskboard is running on the HDMI display."
 api_port=$(PYTHONPATH="$DEST" python3 -c 'from deskboard_config import load_config; print(load_config()["port"])')
+tz_line=$(PYTHONPATH="$DEST" python3 -c 'from deskboard_config import public_config; c=public_config(); print(c["timezone_resolved"] + " (" + c["timezone"] + ")")')
+echo "Clock timezone:  $tz_line"
 if command -v tailscale >/dev/null 2>&1; then
   ts_ip=$(tailscale ip -4 2>/dev/null || true)
   if [[ -n "${ts_ip}" ]]; then

@@ -69,6 +69,8 @@ cp config.example.json config.json
 python3 serve.py
 ```
 
+The clock follows the host machine's timezone. Set `timezone` in `config.json` or in the configurator to override it with an IANA name, or leave it as `auto`.
+
 Open:
 
 - Board: `http://127.0.0.1:8730`

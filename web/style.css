@@ -1217,7 +1217,8 @@ html.cfg body {
 }
 
 .cfg-size select,
-.cfg-theme-pick select {
+.cfg-theme-pick select,
+.cfg-tz select {
   font: inherit;
   font-size: 13px;
   color: var(--ink);
@@ -1225,6 +1226,17 @@ html.cfg body {
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 5px 8px;
+}
+
+.cfg-tz select {
+  max-width: 100%;
+  width: min(420px, 100%);
+}
+
+.cfg-tz-note {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 13px;
 }
 
 .cfg-gallery {

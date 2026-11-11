@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import tiles
-from deskboard_config import ROOT, load_config
+from deskboard_config import ROOT, load_config, resolved_timezone
 
 PATH = Path(os.environ["DESKBOARD_WIDGETS"]) if os.environ.get("DESKBOARD_WIDGETS") else ROOT / "widgets.json"
 LOCK = PATH.with_name(PATH.name + ".lock")
@@ -435,7 +435,7 @@ def post_line(widget_id: str, data: dict) -> dict:
 
 def _clock_stamp(now: datetime | None = None) -> str:
     try:
-        zone = ZoneInfo(load_config().get("timezone") or "UTC")
+        zone = ZoneInfo(resolved_timezone())
     except (ZoneInfoNotFoundError, ValueError):
         zone = ZoneInfo("UTC")
     moment = (now or datetime.now(zone)).astimezone(zone)

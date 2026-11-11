@@ -179,6 +179,31 @@ function reloadTileCatalog() {
   return loadTileCatalog();
 }
 
+function ianaTimeZones() {
+  let zones = [];
+  try {
+    if (typeof Intl.supportedValuesOf === "function") zones = Intl.supportedValuesOf("timeZone").slice();
+  } catch (_err) {
+    zones = [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const zone of ["UTC"].concat(zones.sort())) {
+    if (!zone || seen.has(zone)) continue;
+    seen.add(zone);
+    out.push(zone);
+  }
+  return out;
+}
+
+function configZone(config) {
+  if (!config) return "UTC";
+  if (typeof config.timezone_resolved === "string" && config.timezone_resolved) return config.timezone_resolved;
+  const setting = typeof config.timezone === "string" ? config.timezone.trim() : "";
+  if (setting && setting.toLowerCase() !== "auto") return setting;
+  return "UTC";
+}
+
 function zonedParts(date, timeZone) {
   const out = {};
   const fmt = new Intl.DateTimeFormat("en-GB", {
@@ -501,13 +526,12 @@ class Board {
     if (!data) return;
     if (typeof data.mark === "string" && data.mark) this.markNode.textContent = data.mark;
     else this.markNode.textContent = "DESK";
-    if (typeof data.timezone === "string" && data.timezone) {
-      try {
-        new Intl.DateTimeFormat("en-GB", { timeZone: data.timezone });
-        this.timezone = data.timezone;
-      } catch (_err) {
-        this.timezone = "UTC";
-      }
+    const zone = configZone(data);
+    try {
+      new Intl.DateTimeFormat("en-GB", { timeZone: zone });
+      this.timezone = zone;
+    } catch (_err) {
+      this.timezone = "UTC";
     }
     if (typeof data.night_dim === "boolean") this.nightDim = data.night_dim;
     if (Number.isInteger(data.night_start)) this.nightStart = data.night_start;
@@ -2310,6 +2334,21 @@ function startConfigurator() {
   themeSec.append(themeGrid);
   left.append(themeSec);
 
+  const tzSec = el("section", "cfg-section");
+  tzSec.append(el("h2", null, "Timezone"));
+  const tzRow = el("div", "cfg-tz");
+  const tzSelect = el("select");
+  tzRow.append(tzSelect);
+  tzSec.append(tzRow);
+  tzSec.append(
+    el(
+      "p",
+      "cfg-tz-note",
+      "The clock, calendar, and bot stamps use this zone. Automatic follows the machine. This does not change the OS timezone.",
+    ),
+  );
+  left.append(tzSec);
+
   const board = new Board(boardRoot, { preview: true });
 
   function applyPreviewSize() {
@@ -2499,6 +2538,39 @@ function startConfigurator() {
     if (w.type === "theme_card") return w.caption || w.image || "";
     return w.type;
   }
+
+  function renderTimezone() {
+    clear(tzSelect);
+    const setting = ((S.config.timezone || "auto") + "").trim() || "auto";
+    const resolved = configZone(S.config);
+    const auto = el("option");
+    auto.value = "auto";
+    auto.textContent = "Automatic (machine: " + resolved + ")";
+    tzSelect.append(auto);
+    const zones = ianaTimeZones();
+    if (setting !== "auto" && setting && !zones.includes(setting)) zones.unshift(setting);
+    for (const zone of zones) {
+      const opt = el("option", null, zone);
+      opt.value = zone;
+      tzSelect.append(opt);
+    }
+    tzSelect.value = setting === "auto" ? "auto" : setting;
+  }
+
+  tzSelect.addEventListener("change", async () => {
+    const wanted = tzSelect.value;
+    try {
+      const data = await api("PATCH", "/api/config", { timezone: wanted });
+      S.config = Object.assign({}, S.config, data);
+      board.applyConfig(Object.assign({}, S.status, S.config));
+      renderTimezone();
+      const shown = configZone(S.config);
+      say(wanted === "auto" ? "Timezone follows the machine (" + shown + ")." : "Timezone set to " + shown + ".");
+    } catch (err) {
+      say(String(err.message || err));
+      renderTimezone();
+    }
+  });
 
   function renderThemes() {
     clear(themeGrid);
@@ -3092,7 +3164,7 @@ function startConfigurator() {
       ];
     }
     const text = await file.text();
-    const tz = S.config.timezone || "UTC";
+    const tz = configZone(S.config);
     if (ext === "ics" || /^BEGIN:VCALENDAR/m.test(text.slice(0, 200))) return parseIcs(text, name, tz);
     if (ext === "json") {
       let data;
@@ -3220,6 +3292,7 @@ function startConfigurator() {
     });
     S.undo = [];
     renderThemes();
+    renderTimezone();
     renderCards();
   }
 

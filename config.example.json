@@ -1,6 +1,6 @@
 {
   "mark": "DESK",
-  "timezone": "UTC",
+  "timezone": "auto",
   "port": 8730,
   "night_dim": true,
   "night_start": 22,

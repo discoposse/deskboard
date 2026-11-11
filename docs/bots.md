@@ -46,7 +46,7 @@ curl -sS -X POST http://127.0.0.1:8730/api/widgets/botstatus/post \
   -d '{"source": "Backup", "text": "Nightly backup finished"}'
 ```
 
-The line reads `9:05 PM  Backup  Nightly backup finished`, with two spaces between parts and the time in the board's configured `timezone`. The rules are below.
+The line reads `9:05 PM  Backup  Nightly backup finished`, with two spaces between parts and the time in the board's resolved timezone (`timezone_resolved`, which follows the host when `timezone` is `auto`). The rules are below.
 
 - The tile keeps its newest `max_items` lines (1 to 8, default 6).
 - A line is at most 80 characters. Long text is cut with `…`, and a source longer than 24 characters is cut too.

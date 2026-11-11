@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Clock timezone defaults to `auto`, which follows the host machine. Detection checks the `TZ` env var, `/etc/timezone`, the `/etc/localtime` symlink, and `timedatectl`, then falls back to UTC. An IANA name in config still overrides it. An invalid value falls back to auto and logs a warning. `GET /api/config` and `GET /api/status` include `timezone_resolved`. The configurator has a timezone picker with an Automatic option.
+
 - Deskboard MCP server in `mcp/deskboard_mcp.py`. Stdio with the standard library, optional streamable HTTP on 127.0.0.1 through the `mcp` SDK. Tools are `post_status`, `list_tiles`, `read_tile`, and `board_status`. Posts go only to list tiles managed by `bots` unless `DESKBOARD_ALLOW_ANY_LIST=1`. `docs/mcp.md` covers Cursor, Claude Desktop, and other stdio clients.
 
 - Managed tiles. An optional `managed_by` on any widget marks it as filled by a bot. The configurator shows its content read-only and still edits its size, order, and visibility. Apply sends `keep_managed`, so it never writes over a bot's content.
