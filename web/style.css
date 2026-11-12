@@ -1615,6 +1615,23 @@ html.cfg body {
 .cfg-owner {
   display: grid;
   gap: 6px;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cfg-owner select,
+.cfg-owner-custom input {
+  width: 100%;
+}
+
+.cfg-owner-custom {
+  display: grid;
+  gap: 3px;
+}
+
+.cfg-owner-custom[hidden] {
+  display: none;
 }
 
 .cfg-owner-hint {

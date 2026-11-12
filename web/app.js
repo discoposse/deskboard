@@ -3403,11 +3403,11 @@ function startConfigurator() {
     const w = entry.w;
     const wrap = el("div", "cfg-owner");
     const presets = [
-      ["", "Not managed"],
+      ["", "None"],
       ["bots", "bots"],
       ["calendar", "calendar"],
       ["tasks", "tasks"],
-      ["custom", "Other name"],
+      ["custom", "Custom"],
     ];
     const current = typeof w.managed_by === "string" ? w.managed_by : "";
     const known = ["", "bots", "calendar", "tasks"].includes(current);
@@ -3422,16 +3422,19 @@ function startConfigurator() {
     custom.value = known ? "" : current;
     custom.maxLength = 24;
     custom.placeholder = "short name";
-    custom.hidden = known;
     custom.spellcheck = false;
     custom.autocomplete = "off";
+    custom.setAttribute("aria-label", "Custom source");
+    const customLabel = el("label", "cfg-owner-custom", "Custom source");
+    customLabel.hidden = known;
+    customLabel.append(custom);
     const hint = el("p", "cfg-owner-hint", "");
     const paintHint = () => {
       const name = typeof w.managed_by === "string" ? w.managed_by : "";
       hint.classList.remove("bad");
       hint.textContent = name
-        ? `${name} owns this text. Apply keeps posted lines and saves this name.`
-        : "Leave this empty and the text stays editable here.";
+        ? `${name} fills this tile. The text stays locked. Apply keeps what ${name} posted.`
+        : "None leaves the text editable here.";
     };
     const commit = (value) => {
       const next = String(value || "").trim().toLowerCase();
@@ -3444,11 +3447,11 @@ function startConfigurator() {
     };
     select.addEventListener("change", () => {
       if (select.value === "custom") {
-        custom.hidden = false;
+        customLabel.hidden = false;
         custom.focus();
         return;
       }
-      custom.hidden = true;
+      customLabel.hidden = true;
       if (commit(select.value)) renderCards();
     });
     custom.addEventListener("input", () => {
@@ -3463,7 +3466,7 @@ function startConfigurator() {
       renderCards();
     });
     wrap.append(field("Managed by", select));
-    wrap.append(custom);
+    wrap.append(customLabel);
     paintHint();
     wrap.append(hint);
     return wrap;
@@ -3642,10 +3645,11 @@ function startConfigurator() {
     }
 
     const ownerControl = renderOwnerControl(entry, onChange, snapOnce);
+    const contentNodes = Array.from(box.childNodes).slice(contentStart);
+    box.insertBefore(ownerControl, contentNodes[0] || null);
     if (w.managed_by) {
       // A bot or sync job owns this tile's content. Layout stays editable.
-      const added = Array.from(box.childNodes).slice(contentStart);
-      for (const node of added) {
+      for (const node of contentNodes) {
         if (node.classList) node.classList.add("cfg-locked");
         for (const ctl of node.querySelectorAll ? node.querySelectorAll("input, textarea, select") : []) {
           ctl.disabled = true;
@@ -3658,11 +3662,7 @@ function startConfigurator() {
         "cfg-warn cfg-managed-note",
         `Filled by ${w.managed_by}. Text is locked here. Move, resize, and Show on board still apply.`,
       );
-      const at = box.childNodes[contentStart] || null;
-      box.insertBefore(note, at);
-      box.insertBefore(ownerControl, at);
-    } else {
-      box.append(ownerControl);
+      box.insertBefore(note, ownerControl);
     }
 
     if (w.type !== "stats") box.append(spanButtons(entry, onChange));

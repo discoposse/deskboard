@@ -60,6 +60,22 @@ curl -s http://127.0.0.1:8730/api/config \
 
 `GET /api/themes` lists every theme id. Full route list in [docs/api.md](docs/api.md).
 
+## Edit tiles on the preview
+
+Open `/?config`. The preview on the left is the board at the size you pick.
+
+**Move a tile.** Press anywhere on a tile in the preview and drag. Clock and Stats stay where they are. After a short movement, a dashed cell follows the pointer and snaps into the grid. Release to drop the tile in that cell. The card list on the right can still be dragged if you prefer. Press Escape during a drag to cancel it.
+
+**Resize a tile.** Drag a corner or an edge of the tile. The span snaps between 1 and 2 for columns and for rows. The tile changes size while you drag, and a small readout shows the span. In Edit, the buttons 1×1, 2×1, 1×2, and 2×2 set the same spans without a drag. There is no arrow-key move.
+
+**Managed tiles.** Open Edit on any tile. The first control is Managed by. Choose None, bots, calendar, tasks, or Custom. Custom asks for a short lowercase name. Apply to board saves that choice with the layout.
+
+A managed tile shows the source name on a small tag. You see it on the preview tile and on the card. The live board shows the same name in the corner of the tile. The text fields pick up a dashed hatch and cannot be typed in. Size, order, and Show on board still save. Choose None and the text fields can be edited again.
+
+Apply keeps text that a managed source already posted. A stale copy in the configurator does not replace those lines. Ctrl+Z or Cmd+Z undoes the last local edit before you Apply.
+
+![Managed by control, owner tag, and preview resize handles](shots/configurator-managed.png)
+
 ## Quick start (any OS)
 
 Needs Python 3.10+.

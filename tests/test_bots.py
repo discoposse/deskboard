@@ -161,6 +161,46 @@ class ManagedTests(BotCase):
         self.assertEqual(todo["items"], ["Ship", "Test"])
         self.assertEqual(todo["col_span"], 2)
 
+    def test_set_clear_and_apply_keep_text_on_note_status_and_embed(self):
+        self.config_path.write_text(json.dumps({"timezone": "America/New_York", "embed_allowlist": ["example.com"]}), encoding="utf-8")
+        self.w.create_widget({"type": "note", "id": "memo", "title": "Memo", "text": "Original note"})
+        self.w.create_widget(
+            {"type": "status", "id": "pings", "title": "Status", "targets": [{"label": "Site", "url": "https://example.com"}]}
+        )
+        self.w.create_widget({"type": "embed", "id": "frame", "title": "Embed", "url": "https://example.com"})
+        self.w.update_widget("memo", {"managed_by": "bots"})
+        self.w.update_widget("pings", {"managed_by": "calendar"})
+        self.w.update_widget("frame", {"managed_by": "tasks"})
+        self.assertEqual(self.by_id("memo")["managed_by"], "bots")
+        self.assertEqual(self.by_id("pings")["managed_by"], "calendar")
+        self.assertEqual(self.by_id("frame")["managed_by"], "tasks")
+        self.w.update_widget("memo", {"text": "Posted by the bot"})
+        self.w.update_widget("pings", {"targets": [{"label": "Site", "url": "https://example.com/live"}]})
+        self.w.update_widget("frame", {"title": "Live embed"})
+        base = self.layout()
+        stale = []
+        for item in self.w.list_widgets():
+            copy = json.loads(json.dumps(item))
+            if copy["id"] == "memo":
+                copy["text"] = "Stale note"
+            elif copy["id"] == "pings":
+                copy["targets"] = [{"label": "Old", "url": "https://example.com/old"}]
+            elif copy["id"] == "frame":
+                copy["title"] = "Stale embed"
+                copy["url"] = "https://example.com/stale"
+            stale.append(copy)
+        self.w.replace_widgets(stale, base_revision=base, keep_managed=True)
+        self.assertEqual(self.by_id("memo")["text"], "Posted by the bot")
+        self.assertEqual(self.by_id("pings")["targets"][0]["url"], "https://example.com/live")
+        self.assertEqual(self.by_id("frame")["title"], "Live embed")
+        self.assertEqual(self.by_id("frame")["url"], "https://example.com")
+        for widget_id in ("memo", "pings", "frame"):
+            self.w.update_widget(widget_id, {"managed_by": ""})
+            self.assertNotIn("managed_by", self.by_id(widget_id))
+        self.assertEqual(self.by_id("memo")["text"], "Posted by the bot")
+        self.assertEqual(self.by_id("pings")["targets"][0]["url"], "https://example.com/live")
+        self.assertEqual(self.by_id("frame")["url"], "https://example.com")
+
     def test_keep_managed_can_hide_a_managed_tile(self):
         self.w.replace_widgets(
             [{"type": "list", "id": "botstatus", "items": ["x"], "enabled": False}, {"type": "list", "id": "todo", "items": ["Ship"]}],
