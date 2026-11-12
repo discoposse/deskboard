@@ -28,6 +28,10 @@ The clock, calendar, and bot post stamps use the board's resolved timezone. Worl
 
 Spans: set `col_span` and `row_span` to `1` or `2` so a tile covers more grid cells.
 
+In the configurator, drag a tile on the preview to move it. Drag a corner or an edge to set the span to 1 or 2. A dashed cell shows where the tile will land.
+
+A Managed by field on each tile sets or clears `managed_by`. The board shows that name in the corner of the tile. Apply does not replace lines on a tile that is already managed on the server.
+
 ## Examples
 
 ```bash

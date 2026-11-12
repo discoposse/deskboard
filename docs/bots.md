@@ -18,7 +18,11 @@ curl -sS -X PATCH http://127.0.0.1:8730/api/widgets/botstatus \
 
 Send `"managed_by": ""` to hand the tile back to the configurator.
 
-In the configurator a managed tile carries a dashed badge with the owner name. Its editor says who fills it and greys out the content fields. Size, order, and **Show on board** still save. When you click **Apply to board**, the configurator sends `keep_managed: true`, and the server keeps the stored content of every managed tile and takes only its layout from the request. A post that lands while you edit is never lost.
+The configurator shows the owner name on the tile card and on the preview. Text fields look locked. A Managed by control sets or clears the owner. Size, order, and **Show on board** still save.
+
+Apply sends `keep_managed`, so the server keeps posted lines and only takes the layout from the request. If you change the owner, Apply then saves that name with a separate update and leaves the posted lines in place. A post that lands while you edit is kept.
+
+The board draws a small corner tag with the owner name. The tag uses the theme colors so it stays readable.
 
 ## Revisions and conflicts
 
