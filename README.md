@@ -22,7 +22,7 @@ Higher quality video in [docs/media/demo-configurator-board.mp4](docs/media/demo
 
 These start from the sample layout in `examples/demo-board.json` and match the animation step by step. In the configurator, tile edits stay pending until you press **Apply to board**, which sends the whole layout with `PUT /api/widgets/import`. The `curl` lines make the same change one route at a time.
 
-**1. Move a tile.** Drag the Today card above World clocks under "Tiles, drag to reorder", then press Apply to board. Clock and Stats always stay first.
+**1. Move a tile.** Drag the Today card on the preview. A dashed cell shows where it will land. Drag a corner or an edge to change the span. Then press Apply to board. Clock and Stats always stay first. You can still drag the cards in the list.
 
 ```bash
 curl -s http://127.0.0.1:8730/api/widgets/order \
@@ -59,6 +59,22 @@ curl -s http://127.0.0.1:8730/api/config \
 ```
 
 `GET /api/themes` lists every theme id. Full route list in [docs/api.md](docs/api.md).
+
+## Edit tiles on the preview
+
+Open `/?config`. The preview on the left is the board at the size you pick.
+
+**Move a tile.** Press anywhere on a tile in the preview and drag. Clock and Stats stay where they are. After a short movement, a dashed cell follows the pointer and snaps into the grid. Release to drop the tile in that cell. The card list on the right can still be dragged if you prefer. Press Escape during a drag to cancel it.
+
+**Resize a tile.** Drag a corner or an edge of the tile. The span snaps between 1 and 2 for columns and for rows. The tile changes size while you drag, and a small readout shows the span. In Edit, the buttons 1×1, 2×1, 1×2, and 2×2 set the same spans without a drag. There is no arrow-key move.
+
+**Managed tiles.** Open Edit on any tile. The first control is Managed by. Choose None, bots, calendar, tasks, or Custom. Custom asks for a short lowercase name. Apply to board saves that choice with the layout.
+
+A managed tile shows the source name on a small tag. You see it on the preview tile and on the card. The live board shows the same name in the corner of the tile. The text fields pick up a dashed hatch and cannot be typed in. Size, order, and Show on board still save. Choose None and the text fields can be edited again.
+
+Apply keeps text that a managed source already posted. A stale copy in the configurator does not replace those lines. Ctrl+Z or Cmd+Z undoes the last local edit before you Apply.
+
+![Managed by control, owner tag, and preview resize handles](shots/configurator-managed.png)
 
 ## Quick start (any OS)
 
@@ -108,7 +124,33 @@ Mark a list tile with `"managed_by": "bots"` and any script or assistant can add
 scripts/post.sh botstatus Backup "Nightly backup finished"
 ```
 
-The configurator keeps a managed tile's content read-only and refuses to apply over a newer layout. [How to get your bot to update your Deskboard](docs/bots.md#how-to-get-your-bot-to-update-your-deskboard) has the curl call and a prompt you can paste into any AI assistant. For assistants that speak MCP, [docs/mcp.md](docs/mcp.md) sets up the Deskboard MCP server, which can post status lines and read tiles and nothing else.
+The configurator keeps a managed tile's text locked. The tile shows a small corner tag with the owner name, on the board and in the preview. A Managed by field sets or clears that owner. Apply keeps the lines a bot already posted and saves the layout around them.
+
+[How to get your bot to update your Deskboard](docs/bots.md#how-to-get-your-bot-to-update-your-deskboard) has the curl call and a prompt you can paste into any AI assistant. For assistants that speak MCP, [docs/mcp.md](docs/mcp.md) sets up the Deskboard MCP server, which can post status lines, send a flash, and read tiles.
+
+## Flash a message
+
+A flash is for something the room should see right away, such as a calendar warning. It eases in, fills most of the screen, and eases out. The default time on screen is 30 seconds. You can set 5 to 120. A thin bar counts down. A tap closes it early when the screen has a pointer. A kiosk with no keyboard and no touch still clears it when the time ends.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8730/api/flash \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"Calendar","title":"Leave in 10 minutes","body":"Downtown review starts soon.","level":"warning","duration":30}'
+```
+
+```bash
+scripts/flash.sh Calendar "Leave in 10 minutes" "Downtown review starts soon." warning 30
+```
+
+`level` is `info`, `warning`, or `urgent`. Several different flashes play one at a time. The same text posted again within a minute stays as one flash, so a looping bot does not cover the screen over and over. Notices live in memory only. One that is still waiting after its time plus two minutes is dropped.
+
+## Roadmap
+
+These ideas are for later. They are not in this build.
+
+A home with more than one desk can share one hub. The hub would publish tagged channels. Each board would keep its own room profile, subscribe to the channels for that room, and cache the latest lines for a quiet stretch.
+
+An optional MQTT bridge could sit next to that hub for clients that already speak MQTT. A board can already take a flash or a tile line over HTTP, with no broker in the middle.
 
 ## Install as a desk kiosk (Ubuntu)
 
@@ -123,7 +165,8 @@ That installs Cage + WebKitGTK, writes systemd units, and starts the board on th
 ## What you get
 
 - Tile grid that stays inside the viewport from 1024x600 up to 4K, including portrait
-- Drag-and-drop configurator. Drop files, drag tiles on the preview to move them, and drag corners or edges to resize. Live preview.
+- Drag-and-drop configurator. Drop files, drag tiles on the preview to move them, and drag corners or edges to resize. Managed tiles show an owner tag and keep their text locked. Live preview.
+- Full-screen flash notices that ease in and close themselves
 - Themes (warm dark default, plus Tokyo Night, Catppuccin, Gruvbox, Nord, Rose Pine, Tiling, Paper)
 - Tile catalog under `tiles/` with a scaffold script, a preview page, and off-by-default community tiles
 - Widgets for notes, lists, metrics, markdown, weather, countdown, ICS calendar, GitHub stars, embeds, RSS, images, timers, URL status, world clocks, and theme art cards

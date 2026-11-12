@@ -19,6 +19,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from deskboard_config import load_config, public_config, resolved_timezone, update_config
+from flashes import FlashError, list_flashes, post_flash
 from fetches import (
     calendar_payload,
     github_payload,
@@ -269,6 +270,8 @@ def api_index() -> dict:
             "GET /api/tiles",
             "POST /api/reload",
             "POST /api/widgets/{id}/post",
+            "GET /api/flash",
+            "POST /api/flash",
             "GET /api/widget-data/{id}",
             "GET /api/github",
         ],
@@ -402,6 +405,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(409, {"error": str(exc), "stale": True, "base_revision": exc.base, "layout_revision": exc.current})
         except WidgetError as exc:
             self._error(exc.status, str(exc))
+        except FlashError as exc:
+            self._error(exc.status, str(exc))
         except ValueError as exc:
             self._error(400, str(exc))
         except Exception as exc:
@@ -429,6 +434,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/reload" and method == "POST":
             self._mutate(method, path, reload_tiles)
+            return
+        if path == "/api/flash" and method == "GET":
+            self._json(200, list_flashes(), head=head)
+            return
+        if path == "/api/flash" and method == "POST":
+            self._mutate(method, path, post_flash)
+            return
+        if path == "/api/flash":
+            self._error(405, "method not allowed")
             return
         if path == "/api/github" and method == "GET":
             self._json(200, bulk_github(), head=head)

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The Managed by control sits at the top of every tile in the configurator. The choices are None, bots, calendar, tasks, and a custom name. The README describes preview drag, corner and edge resize, the owner tag, and locked text.
+
+- Flash messages. `POST /api/flash` shows a large notice that eases in, fills most of the screen, and closes itself. The default time is 30 seconds, clamped from 5 to 120. The board plays one at a time, drops expired notices, and ignores an identical repeat inside a minute. `scripts/flash.sh` and the MCP tool `post_flash` send one. Nothing is written to disk.
+
 - Clock timezone defaults to `auto`, which follows the host machine. Detection checks the `TZ` env var, `/etc/timezone`, the `/etc/localtime` symlink, and `timedatectl`, then falls back to UTC. An IANA name in config still overrides it. An invalid value falls back to auto and logs a warning. `GET /api/config` and `GET /api/status` include `timezone_resolved`. The configurator has a timezone picker with an Automatic option.
 
 - Deskboard MCP server in `mcp/deskboard_mcp.py`. Stdio with the standard library, optional streamable HTTP on 127.0.0.1 through the `mcp` SDK. Tools are `post_status`, `list_tiles`, `read_tile`, and `board_status`. Posts go only to list tiles managed by `bots` unless `DESKBOARD_ALLOW_ANY_LIST=1`. `docs/mcp.md` covers Cursor, Claude Desktop, and other stdio clients.

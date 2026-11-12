@@ -7,17 +7,19 @@
 | Tool | What it does |
 | --- | --- |
 | `post_status(text, source?, widget="botstatus")` | Adds one plain-text line to a list tile through `POST /api/widgets/{id}/post`. |
+| `post_flash(title, body, source?, level?, duration?)` | Shows one full-screen notice through `POST /api/flash`. It closes itself. |
 | `list_tiles()` | Lists tiles with `id`, `type`, `title`, `enabled`, and `managed_by`. |
 | `read_tile(id)` | Returns one tile's stored fields. |
 | `board_status()` | Returns `GET /api/status` with the hostname left out. |
 
-There are no tools that create, delete, move, resize, theme, or import tiles. The server cannot change the board in any way other than adding a status line.
+There are no tools that create, delete, move, resize, theme, or import tiles. The server can add a status line or a flash notice and nothing else.
 
 ## Safety rules
 
 - Posts go only to enabled list tiles with `"managed_by": "bots"`. Anything else is refused with a message that says why. Set `DESKBOARD_ALLOW_ANY_LIST=1` to allow any enabled list tile, or `DESKBOARD_MANAGED_BY` to use another owner tag.
 - A missing or hidden tile is refused, and the server never creates one.
 - Text is one plain line of at most 200 characters, and the source name is at most 24. Newlines, tabs, and other control characters are refused. The board trims each line to 80 characters.
+- A flash title is one line of at most 80 characters. The body is plain text of at most 400 characters and 6 lines. `duration` defaults to 30 seconds and is clamped to 5..120. An identical flash inside 60 seconds is not shown twice.
 - The server sends no secrets because it has none. Keep secrets, tokens, codes, and private mail out of what your assistant posts, since every device that can reach the board can read it.
 - An older board without the post route answers `404` or `405`. The MCP server reports that the board needs an update and a restart, and it does not fall back to editing the tile.
 - An unreachable board gets a clear error naming `DESKBOARD_URL`.
