@@ -102,7 +102,7 @@ Run `scripts/reload.sh` and open `http://127.0.0.1:8730/?tilepreview=my_tile` to
 
 ## Let your bots post
 
-Mark a list tile with `"managed_by": "bots"` and any script or assistant can add a line to it.
+Mark a list tile with `"managed_by": "bots"` and any script or assistant can add a line to it. The board shows a small corner tag with that name. In the configurator the text is locked, and a Managed by field sets or clears the owner.
 
 ```bash
 scripts/post.sh botstatus Backup "Nightly backup finished"
@@ -123,7 +123,7 @@ That installs Cage + WebKitGTK, writes systemd units, and starts the board on th
 ## What you get
 
 - Tile grid that stays inside the viewport from 1024x600 up to 4K, including portrait
-- Drag-and-drop configurator: drop files, reorder tiles, resize spans, live preview
+- Drag-and-drop configurator. Drop files, drag tiles on the preview to move them, and drag corners or edges to resize. Live preview.
 - Themes (warm dark default, plus Tokyo Night, Catppuccin, Gruvbox, Nord, Rose Pine, Tiling, Paper)
 - Tile catalog under `tiles/` with a scaffold script, a preview page, and off-by-default community tiles
 - Widgets for notes, lists, metrics, markdown, weather, countdown, ICS calendar, GitHub stars, embeds, RSS, images, timers, URL status, world clocks, and theme art cards

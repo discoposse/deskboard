@@ -89,6 +89,78 @@ class ManagedTests(BotCase):
         self.assertEqual(bot["items"], ["Reset"])
         self.assertNotIn("managed_by", bot)
 
+    def test_apply_keeps_posted_lines_when_the_owner_changes(self):
+        base = self.layout()
+        self.w.post_line("botstatus", {"source": "Backup", "text": "done"})
+        posted = list(self.by_id("botstatus")["items"])
+        self.w.replace_widgets(
+            [
+                {
+                    "type": "list",
+                    "id": "botstatus",
+                    "title": "Old",
+                    "items": ["Waiting"],
+                    "managed_by": "calendar",
+                    "col_span": 2,
+                    "order": 0,
+                },
+                {"type": "list", "id": "todo", "items": ["Ship"], "order": 10},
+            ],
+            base_revision=base,
+            keep_managed=True,
+        )
+        self.assertEqual(self.by_id("botstatus")["items"], posted)
+        self.assertEqual(self.by_id("botstatus")["col_span"], 2)
+        self.assertEqual(self.by_id("botstatus")["managed_by"], "bots")
+        self.assertEqual(self.by_id("botstatus")["title"], "Bots")
+        self.w.update_widget("botstatus", {"managed_by": "calendar"})
+        self.assertEqual(self.by_id("botstatus")["items"], posted)
+        self.assertEqual(self.by_id("botstatus")["managed_by"], "calendar")
+
+    def test_apply_keeps_posted_lines_when_the_owner_is_cleared(self):
+        base = self.layout()
+        self.w.post_line("botstatus", {"source": "Backup", "text": "done"})
+        posted = list(self.by_id("botstatus")["items"])
+        self.w.replace_widgets(
+            [
+                {"type": "list", "id": "botstatus", "title": "Old", "items": ["Waiting"], "enabled": True, "order": 0},
+                {"type": "list", "id": "todo", "items": ["Ship"], "order": 10},
+            ],
+            base_revision=base,
+            keep_managed=True,
+        )
+        self.w.update_widget("botstatus", {"managed_by": ""})
+        bot = self.by_id("botstatus")
+        self.assertNotIn("managed_by", bot)
+        self.assertEqual(bot["items"], posted)
+        self.assertEqual(bot["title"], "Bots")
+
+    def test_apply_can_mark_an_unmanaged_tile_without_touching_a_managed_one(self):
+        posted = list(self.by_id("botstatus")["items"])
+        self.w.replace_widgets(
+            [
+                {"type": "list", "id": "botstatus", "title": "Old", "items": ["Waiting"], "order": 0},
+                {
+                    "type": "list",
+                    "id": "todo",
+                    "title": "Today",
+                    "items": ["Ship", "Test"],
+                    "managed_by": "tasks",
+                    "col_span": 2,
+                    "order": 10,
+                },
+            ],
+            keep_managed=True,
+        )
+        bot = self.by_id("botstatus")
+        self.assertEqual(bot["items"], posted)
+        self.assertEqual(bot["managed_by"], "bots")
+        self.assertEqual(bot["title"], "Bots")
+        todo = self.by_id("todo")
+        self.assertEqual(todo["managed_by"], "tasks")
+        self.assertEqual(todo["items"], ["Ship", "Test"])
+        self.assertEqual(todo["col_span"], 2)
+
     def test_keep_managed_can_hide_a_managed_tile(self):
         self.w.replace_widgets(
             [{"type": "list", "id": "botstatus", "items": ["x"], "enabled": False}, {"type": "list", "id": "todo", "items": ["Ship"]}],

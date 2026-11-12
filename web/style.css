@@ -236,6 +236,39 @@ html.kiosk .board {
   background: var(--tile);
 }
 
+/* Owner tag. Kept inside the tile so it cannot trip the overflow checks. */
+.board .tile-owner {
+  position: absolute;
+  z-index: 2;
+  top: calc(var(--u) * 7px);
+  right: calc(var(--u) * 9px);
+  max-width: 38%;
+  margin: 0;
+  padding: calc(var(--u) * 2px) calc(var(--u) * 6px);
+  font-size: calc(var(--u) * 12px);
+  line-height: 1.15;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--muted);
+  border-radius: calc(var(--u) * 2px);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+html.kiosk .board .tile:has(.tile-owner) .eyebrow {
+  padding-right: 36%;
+}
+
+.board.tiling .tile-owner {
+  border-radius: 0;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
 .board.tiling {
   --font-display: var(--font-mono);
 }
@@ -592,6 +625,210 @@ html.cfg body {
   width: 1920px;
   height: 1080px;
   transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.cfg-canvas-note {
+  margin: 0 0 8px;
+  color: var(--faint);
+  font-size: 13px;
+}
+
+.cfg-frame .tile-owner {
+  display: none;
+}
+
+.cfg-canvas-ui {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.cfg-canvas-tile {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+}
+
+.cfg-canvas-tile.is-dragging {
+  z-index: 6;
+  cursor: grabbing;
+  outline: 1px dashed var(--ink);
+  outline-offset: -1px;
+}
+
+.cfg-canvas-tile.is-resizing {
+  z-index: 6;
+}
+
+.cfg-canvas-grip {
+  position: absolute;
+  top: 3px;
+  left: 18px;
+  max-width: 42%;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--bg);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+}
+
+.cfg-canvas-tile:hover .cfg-canvas-grip,
+.cfg-canvas-tile.is-dragging .cfg-canvas-grip {
+  opacity: 1;
+}
+
+.cfg-canvas-owner {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  max-width: 46%;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.3;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--muted);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cfg-span-live {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  display: none;
+  padding: 1px 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--muted);
+  pointer-events: none;
+}
+
+.cfg-canvas-tile.is-resizing .cfg-span-live {
+  display: block;
+}
+
+.cfg-canvas-tile .tile-handle {
+  position: absolute;
+  z-index: 2;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.cfg-canvas-tile .tile-handle.nw,
+.cfg-canvas-tile .tile-handle.ne,
+.cfg-canvas-tile .tile-handle.se,
+.cfg-canvas-tile .tile-handle.sw {
+  width: 16px;
+  height: 16px;
+}
+
+.cfg-canvas-tile .tile-handle.nw {
+  top: 3px;
+  left: 3px;
+  border-top: 2px solid var(--ink);
+  border-left: 2px solid var(--ink);
+  cursor: nwse-resize;
+}
+
+.cfg-canvas-tile .tile-handle.ne {
+  top: 3px;
+  right: 3px;
+  border-top: 2px solid var(--ink);
+  border-right: 2px solid var(--ink);
+  cursor: nesw-resize;
+}
+
+.cfg-canvas-tile .tile-handle.se {
+  right: 3px;
+  bottom: 3px;
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  cursor: nwse-resize;
+}
+
+.cfg-canvas-tile .tile-handle.sw {
+  bottom: 3px;
+  left: 3px;
+  border-bottom: 2px solid var(--ink);
+  border-left: 2px solid var(--ink);
+  cursor: nesw-resize;
+}
+
+.cfg-canvas-tile .tile-handle.n,
+.cfg-canvas-tile .tile-handle.s {
+  left: 50%;
+  width: 28px;
+  height: 12px;
+  margin-left: -14px;
+  cursor: ns-resize;
+}
+
+.cfg-canvas-tile .tile-handle.n {
+  top: 2px;
+  border-top: 2px solid var(--ink);
+}
+
+.cfg-canvas-tile .tile-handle.s {
+  bottom: 2px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.cfg-canvas-tile .tile-handle.e,
+.cfg-canvas-tile .tile-handle.w {
+  top: 50%;
+  width: 12px;
+  height: 28px;
+  margin-top: -14px;
+  cursor: ew-resize;
+}
+
+.cfg-canvas-tile .tile-handle.e {
+  right: 2px;
+  border-right: 2px solid var(--ink);
+}
+
+.cfg-canvas-tile .tile-handle.w {
+  left: 2px;
+  border-left: 2px solid var(--ink);
+}
+
+.cfg-canvas-placeholder {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--accent);
+  pointer-events: none;
+}
+
+.cfg-canvas-placeholder::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 1px solid var(--line);
+}
+
+.cfg-grid-ph {
+  min-width: 0;
+  min-height: 0;
 }
 
 .cfg-slots {
@@ -658,6 +895,16 @@ html.cfg body {
   border-radius: 12px;
   background: rgba(242, 239, 231, 0.03);
   padding: 12px 14px;
+}
+
+.cfg-card.is-managed {
+  background-color: rgba(242, 239, 231, 0.03);
+  background-image:
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink));
+  background-repeat: no-repeat;
+  background-size: 16px 1px, 1px 16px;
+  background-position: 8px 8px, 8px 8px;
 }
 
 .cfg-card[draggable="true"] {
@@ -1353,7 +1600,47 @@ html.cfg body {
 }
 
 .cfg-badge.cfg-managed {
+  color: var(--ink);
+  border-style: solid;
+  border-color: var(--muted);
+}
+
+.cfg-managed-note {
+  margin-left: 0;
+  color: var(--ink);
+  border: 1px dashed var(--line);
+  padding: 6px 8px;
+}
+
+.cfg-owner {
+  display: grid;
+  gap: 6px;
+}
+
+.cfg-owner-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.cfg-owner-hint.bad {
+  color: var(--bad);
+}
+
+.cfg-edit .cfg-locked input,
+.cfg-edit .cfg-locked textarea,
+.cfg-edit .cfg-locked select {
+  color: var(--muted);
   border-style: dashed;
+  cursor: not-allowed;
+  background-color: #141512;
+  background-image: repeating-linear-gradient(
+    -18deg,
+    transparent,
+    transparent 4px,
+    rgba(242, 239, 231, 0.05) 4px,
+    rgba(242, 239, 231, 0.05) 5px
+  );
 }
 
 .cfg-stale {

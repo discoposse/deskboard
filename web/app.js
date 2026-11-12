@@ -48,6 +48,16 @@ function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+function stampOwner(tile, widget) {
+  if (!tile || !widget) return;
+  const name = widget.managed_by;
+  if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{0,23}$/.test(name)) return;
+  const mark = el("span", "tile-owner", name);
+  mark.title = "Managed by " + name;
+  tile.dataset.owner = name;
+  tile.append(mark);
+}
+
 /* ---------- tile catalog ---------- */
 
 // Metadata from GET /api/tiles for enabled tiles, and the render functions
@@ -701,6 +711,7 @@ class Board {
         tile.style.gridColumn = `span ${span}`;
         if (clampSpan(clock.row_span) > 1) tile.style.gridRow = `span ${clampSpan(clock.row_span)}`;
       }
+      stampOwner(tile, clock);
       grid.append(tile);
     }
 
@@ -711,6 +722,7 @@ class Board {
       const rs = clampSpan(widget.row_span);
       if (cs > 1) tile.style.gridColumn = `span ${cs}`;
       if (rs > 1) tile.style.gridRow = `span ${rs}`;
+      stampOwner(tile, widget);
       grid.append(tile);
     }
 
@@ -1650,7 +1662,13 @@ function sanitize(widget) {
     col_span: clampSpan(widget.col_span),
     row_span: clampSpan(widget.row_span),
   };
-  if (typeof widget.managed_by === "string" && /^[a-z][a-z0-9_-]{0,23}$/.test(widget.managed_by)) w.managed_by = widget.managed_by;
+  if (widget.managed_by != null && widget.managed_by !== "") {
+    if (typeof widget.managed_by !== "string" || !/^[a-z][a-z0-9_-]{0,23}$/.test(widget.managed_by)) {
+      errors.push("Managed by must be a short lowercase name");
+    } else {
+      w.managed_by = widget.managed_by;
+    }
+  }
   const warnings = [];
   const errors = [];
   const singleField = (key, max, label, required) => {
@@ -1823,7 +1841,7 @@ function sanitize(widget) {
 }
 
 function sameFields(a, b, type) {
-  const keys = (EDITABLE[type] || []).concat("enabled");
+  const keys = (EDITABLE[type] || []).concat("enabled", "managed_by");
   const diff = [];
   for (const key of keys) {
     const av = key === "enabled" ? a.enabled !== false : a[key];
@@ -1984,7 +2002,7 @@ function specFromObject(obj, name) {
     else if (obj.label != null && obj.value != null) type = "metric";
   }
   if (!EDITABLE[type] || !knownType(type)) return null;
-  const allowed = new Set(["id", "type", "enabled", "col_span", "row_span"].concat(EDITABLE[type]));
+  const allowed = new Set(["id", "type", "enabled", "col_span", "row_span", "managed_by"].concat(EDITABLE[type]));
   const widget = { type };
   const dropped = [];
   for (const [key, value] of Object.entries(obj)) {
@@ -2274,10 +2292,20 @@ function startConfigurator() {
   sizeWrap.append(sizeSelect);
   prevHead.append(sizeWrap);
   prevSec.append(prevHead);
+  prevSec.append(
+    el(
+      "p",
+      "cfg-canvas-note",
+      "Drag a tile to move it. Drag a corner or an edge to resize. A dashed cell shows where it will land.",
+    ),
+  );
 
   const frame = el("div", "cfg-frame");
   const boardRoot = el("div");
-  frame.append(boardRoot);
+  const canvasUi = el("div", "cfg-canvas-ui");
+  const canvasBoxes = new Map();
+  const canvasPlaceholder = el("div", "cfg-grid-ph");
+  frame.append(boardRoot, canvasUi);
   prevSec.append(frame);
   const slots = el("div", "cfg-slots");
   prevSec.append(slots);
@@ -2364,6 +2392,7 @@ function startConfigurator() {
     boardRoot.style.transformOrigin = "top left";
     frame.style.height = `${h * s}px`;
     board.fit();
+    if (!S.gesture) layoutCanvas();
   }
   sizeSelect.addEventListener("change", () => {
     applyPreviewSize();
@@ -2640,6 +2669,359 @@ function startConfigurator() {
 
   let dragKey = null;
 
+  function entryByWidgetId(id) {
+    return S.entries.find((e) => !e.deleted && e.w && e.w.id === id);
+  }
+
+  function canvasEntries() {
+    return orderedLive().filter((e) => e.w.enabled !== false && e.w.type !== "clock" && e.w.type !== "stats");
+  }
+
+  function placeCanvasBox(box, rect, origin) {
+    box.style.left = `${rect.left - origin.left}px`;
+    box.style.top = `${rect.top - origin.top}px`;
+    box.style.width = `${Math.max(0, rect.width)}px`;
+    box.style.height = `${Math.max(0, rect.height)}px`;
+  }
+
+  function syncOwnerBadge(box, id) {
+    const entry = entryByWidgetId(id);
+    const name = entry && typeof entry.w.managed_by === "string" ? entry.w.managed_by : "";
+    let badge = box.querySelector(".cfg-canvas-owner");
+    if (!name) {
+      if (badge) badge.remove();
+      box.classList.remove("is-managed");
+      return;
+    }
+    if (!badge) {
+      badge = el("span", "cfg-canvas-owner", name);
+      box.append(badge);
+    } else badge.textContent = name;
+    badge.title = "Managed by " + name;
+    box.classList.add("is-managed");
+  }
+
+  function ensureCanvasBox(id) {
+    let box = canvasBoxes.get(id);
+    if (box) {
+      syncOwnerBadge(box, id);
+      return box;
+    }
+    box = el("div", "cfg-canvas-tile");
+    box.dataset.id = id;
+    box.title = "Drag to move. Drag a corner or an edge to resize.";
+    const grip = el("span", "cfg-canvas-grip", "Drag");
+    box.append(grip);
+    for (const name of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+      const handle = el("span", `tile-handle ${name}`);
+      handle.dataset.handle = name;
+      handle.setAttribute("role", "button");
+      handle.setAttribute("aria-label", `Resize from the ${name} edge`);
+      box.append(handle);
+    }
+    const readout = el("span", "cfg-span-live", "");
+    box.append(readout);
+    box.addEventListener("pointerdown", (ev) => {
+      if (S.gesture || ev.button != null && ev.button !== 0) return;
+      const handle = ev.target.closest ? ev.target.closest(".tile-handle") : null;
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (handle) beginResize(ev, id, handle.dataset.handle);
+      else beginDrag(ev, id);
+    });
+    canvasBoxes.set(id, box);
+    canvasUi.append(box);
+    syncOwnerBadge(box, id);
+    return box;
+  }
+
+  function syncCanvasTheme() {
+    if (!board.root) return;
+    const style = getComputedStyle(board.root);
+    for (const key of ["--ink", "--bg", "--muted", "--line", "--accent", "--faint"]) {
+      const value = style.getPropertyValue(key).trim();
+      if (value) canvasUi.style.setProperty(key, value);
+    }
+  }
+
+  function layoutCanvas(skipId) {
+    if (!canvasUi.isConnected || !board.grid) return;
+    syncCanvasTheme();
+    const origin = canvasUi.getBoundingClientRect();
+    const seen = new Set();
+    const tiles = Array.from(board.grid.querySelectorAll(":scope > .tile:not(.hero)"));
+    for (const tile of tiles) {
+      const id = tile.dataset.widgetId || "";
+      if (!id) continue;
+      seen.add(id);
+      if (id === skipId || tile.style.display === "none") continue;
+      const entry = entryByWidgetId(id);
+      if (entry && (!S.gesture || S.gesture.id !== id)) {
+        tile.dataset.colSpan = String(clampSpan(entry.w.col_span));
+        tile.dataset.rowSpan = String(clampSpan(entry.w.row_span));
+      }
+      const box = ensureCanvasBox(id);
+      const readout = box.querySelector(".cfg-span-live");
+      if (readout && (!S.gesture || S.gesture.kind !== "resize")) {
+        readout.textContent = `${tile.dataset.colSpan || 1}×${tile.dataset.rowSpan || 1}`;
+      }
+      placeCanvasBox(box, tile.getBoundingClientRect(), origin);
+    }
+    const ph = canvasPlaceholder.isConnected ? canvasPlaceholder : null;
+    let phBox = canvasUi.querySelector(":scope > .cfg-canvas-placeholder");
+    if (ph) {
+      const rect = ph.getBoundingClientRect();
+      if (rect.width > 1 && rect.height > 1) {
+        if (!phBox) {
+          phBox = el("div", "cfg-canvas-placeholder");
+          canvasUi.append(phBox);
+        }
+        placeCanvasBox(phBox, rect, origin);
+      } else if (phBox) phBox.remove();
+    } else if (phBox) phBox.remove();
+    for (const [id, box] of canvasBoxes) {
+      if (!seen.has(id)) {
+        box.remove();
+        canvasBoxes.delete(id);
+      }
+    }
+  }
+
+  function movableBoardTiles(exceptId) {
+    return Array.from(board.grid.querySelectorAll(":scope > .tile:not(.hero)")).filter((tile) => {
+      if (tile.style.display === "none") return false;
+      if (exceptId && tile.dataset.widgetId === exceptId) return false;
+      return true;
+    });
+  }
+
+  function boardTile(id) {
+    const safe = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(id) : String(id).replace(/["\\]/g, "\\$&");
+    return board.grid.querySelector(`:scope > .tile[data-widget-id="${safe}"]`);
+  }
+
+  function cellSizeOf(tile) {
+    const rect = tile.getBoundingClientRect();
+    const cs = clampSpan(tile.dataset.colSpan);
+    const rs = clampSpan(tile.dataset.rowSpan);
+    const grid = board.grid;
+    const gridRect = grid.getBoundingClientRect();
+    const scaleX = grid.offsetWidth ? gridRect.width / grid.offsetWidth : 1;
+    const scaleY = grid.offsetHeight ? gridRect.height / grid.offsetHeight : 1;
+    const gapX = (parseFloat(getComputedStyle(grid).columnGap) || 0) * scaleX;
+    const gapY = (parseFloat(getComputedStyle(grid).rowGap) || 0) * scaleY;
+    return {
+      cellW: Math.max(1, (rect.width - gapX * (cs - 1)) / cs),
+      cellH: Math.max(1, (rect.height - gapY * (rs - 1)) / rs),
+    };
+  }
+
+  function placePlaceholder(index) {
+    const tiles = movableBoardTiles();
+    const ref = tiles[index];
+    if (ref) board.grid.insertBefore(canvasPlaceholder, ref);
+    else board.grid.append(canvasPlaceholder);
+  }
+
+  function trackPointer(pointerId, onMove, onEnd) {
+    const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      onMove(ev);
+    };
+    const end = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      onEnd(ev);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  }
+
+  function finishGesture(commit) {
+    const gesture = S.gesture;
+    S.gesture = null;
+    if (gesture && gesture.tile) gesture.tile.style.display = "";
+    if (canvasPlaceholder.isConnected) canvasPlaceholder.remove();
+    if (gesture && gesture.box) {
+      gesture.box.classList.remove("is-dragging", "is-resizing");
+      const grip = gesture.box.querySelector(".cfg-canvas-grip");
+      if (grip) grip.textContent = "Drag";
+    }
+    if (commit) commit();
+    else layoutCanvas();
+  }
+
+  function beginDrag(ev, id) {
+    const tile = boardTile(id);
+    const box = canvasBoxes.get(id);
+    const entry = entryByWidgetId(id);
+    if (!tile || !box || !entry || !window.DeskboardGestures) return;
+    const origin = box.getBoundingClientRect();
+    const tiles = movableBoardTiles();
+    S.gesture = {
+      kind: "pending-drag",
+      id,
+      pointerId: ev.pointerId,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      dx: ev.clientX - origin.left,
+      dy: ev.clientY - origin.top,
+      startIndex: Math.max(0, tiles.indexOf(tile)),
+      index: Math.max(0, tiles.indexOf(tile)),
+      tile,
+      box,
+    };
+    try {
+      box.setPointerCapture(ev.pointerId);
+    } catch (_err) {
+      /* capture is optional */
+    }
+    trackPointer(
+      ev.pointerId,
+      (moveEv) => {
+        const gesture = S.gesture;
+        if (!gesture || gesture.id !== id) return;
+        const dist = Math.hypot(moveEv.clientX - gesture.startX, moveEv.clientY - gesture.startY);
+        if (gesture.kind === "pending-drag") {
+          if (dist < 5) return;
+          gesture.kind = "drag";
+          gesture.tile.style.display = "none";
+          const cs = clampSpan(gesture.tile.dataset.colSpan);
+          const rs = clampSpan(gesture.tile.dataset.rowSpan);
+          canvasPlaceholder.style.gridColumn = cs > 1 ? `span ${cs}` : "";
+          canvasPlaceholder.style.gridRow = rs > 1 ? `span ${rs}` : "";
+          placePlaceholder(gesture.startIndex);
+          gesture.box.classList.add("is-dragging");
+          const entryNow = entryByWidgetId(id);
+          const grip = gesture.box.querySelector(".cfg-canvas-grip");
+          if (grip && entryNow) grip.textContent = labelOf(entryNow);
+        }
+        const frameOrigin = canvasUi.getBoundingClientRect();
+        gesture.box.style.left = `${moveEv.clientX - gesture.dx - frameOrigin.left}px`;
+        gesture.box.style.top = `${moveEv.clientY - gesture.dy - frameOrigin.top}px`;
+        const rects = movableBoardTiles(id).map((node) => node.getBoundingClientRect());
+        const index = window.DeskboardGestures.insertionIndex(rects, moveEv.clientX, moveEv.clientY);
+        if (index !== gesture.index) {
+          gesture.index = index;
+          placePlaceholder(index);
+          layoutCanvas(id);
+        }
+      },
+      (endEv) => {
+        const gesture = S.gesture;
+        if (!gesture || gesture.kind !== "drag" || endEv.type === "pointercancel") {
+          finishGesture();
+          return;
+        }
+        const index = gesture.index;
+        const startIndex = gesture.startIndex;
+        finishGesture(() => {
+          if (index === startIndex) {
+            layoutCanvas();
+            return;
+          }
+          const visible = canvasEntries();
+          const moving = visible.find((e) => e.w.id === id);
+          if (!moving) return;
+          const others = visible.filter((e) => e !== moving);
+          const next = others.slice();
+          next.splice(Math.max(0, Math.min(index, next.length)), 0, moving);
+          if (next.every((e, i) => e === visible[i])) {
+            layoutCanvas();
+            return;
+          }
+          pushUndo();
+          const slots = visible.map((e) => S.entries.indexOf(e)).sort((a, b) => a - b);
+          const placed = new Map(slots.map((pos, i) => [pos, next[i]]));
+          S.entries = S.entries.map((e, i) => (placed.has(i) ? placed.get(i) : e));
+          renderCards();
+        });
+      },
+    );
+  }
+
+  function beginResize(ev, id, handle) {
+    const tile = boardTile(id);
+    const box = canvasBoxes.get(id);
+    const entry = entryByWidgetId(id);
+    if (!tile || !box || !entry || !window.DeskboardGestures) return;
+    const cells = cellSizeOf(tile);
+    S.gesture = {
+      kind: "resize",
+      id,
+      pointerId: ev.pointerId,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      handle,
+      startCol: clampSpan(entry.w.col_span),
+      startRow: clampSpan(entry.w.row_span),
+      cellW: cells.cellW,
+      cellH: cells.cellH,
+      tile,
+      box,
+      col: clampSpan(entry.w.col_span),
+      row: clampSpan(entry.w.row_span),
+    };
+    box.classList.add("is-resizing");
+    try {
+      box.setPointerCapture(ev.pointerId);
+    } catch (_err) {
+      /* capture is optional */
+    }
+    trackPointer(
+      ev.pointerId,
+      (moveEv) => {
+        const gesture = S.gesture;
+        if (!gesture || gesture.kind !== "resize") return;
+        const next = window.DeskboardGestures.spanFromDrag(
+          gesture.startCol,
+          gesture.startRow,
+          gesture.handle,
+          moveEv.clientX - gesture.startX,
+          moveEv.clientY - gesture.startY,
+          gesture.cellW,
+          gesture.cellH,
+        );
+        if (next.col === gesture.col && next.row === gesture.row) return;
+        gesture.col = next.col;
+        gesture.row = next.row;
+        gesture.tile.dataset.colSpan = String(next.col);
+        gesture.tile.dataset.rowSpan = String(next.row);
+        gesture.tile.style.gridColumn = next.col > 1 ? `span ${next.col}` : "";
+        gesture.tile.style.gridRow = next.row > 1 ? `span ${next.row}` : "";
+        const readout = gesture.box.querySelector(".cfg-span-live");
+        if (readout) readout.textContent = `${next.col}×${next.row}`;
+        board.fit();
+        layoutCanvas(id);
+      },
+      () => {
+        const gesture = S.gesture;
+        if (!gesture || gesture.kind !== "resize") {
+          finishGesture();
+          return;
+        }
+        const col = gesture.col;
+        const row = gesture.row;
+        const changed = col !== gesture.startCol || row !== gesture.startRow;
+        finishGesture(() => {
+          if (!changed) {
+            renderCards();
+            return;
+          }
+          const current = entryByWidgetId(id);
+          if (!current) return;
+          pushUndo();
+          current.w.col_span = col;
+          current.w.row_span = row;
+          renderCards();
+        });
+      },
+    );
+  }
+
   function renderCards() {
     clear(cards);
     const ordered = S.entries.slice().sort((a, b) => {
@@ -2660,6 +3042,7 @@ function startConfigurator() {
   function renderCard(entry, over, showPicker) {
     const card = el("div", "cfg-card");
     const fixed = entry.w.type === "clock" || entry.w.type === "stats";
+    if (entry.w.managed_by) card.classList.add("is-managed");
     if (!entry.origId) card.classList.add("is-new");
     else if (changedKeys(entry).length) card.classList.add("is-changed");
     if (entry.deleted) card.classList.add("is-deleted");
@@ -2794,6 +3177,76 @@ function startConfigurator() {
       });
       wrap.append(b);
     }
+    return wrap;
+  }
+
+  function renderOwnerControl(entry, onChange, snapOnce) {
+    const w = entry.w;
+    const wrap = el("div", "cfg-owner");
+    const presets = [
+      ["", "Not managed"],
+      ["bots", "bots"],
+      ["calendar", "calendar"],
+      ["tasks", "tasks"],
+      ["custom", "Other name"],
+    ];
+    const current = typeof w.managed_by === "string" ? w.managed_by : "";
+    const known = ["", "bots", "calendar", "tasks"].includes(current);
+    const select = el("select");
+    for (const [value, label] of presets) {
+      const option = el("option", null, label);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = known ? current : "custom";
+    const custom = el("input");
+    custom.value = known ? "" : current;
+    custom.maxLength = 24;
+    custom.placeholder = "short name";
+    custom.hidden = known;
+    custom.spellcheck = false;
+    custom.autocomplete = "off";
+    const hint = el("p", "cfg-owner-hint", "");
+    const paintHint = () => {
+      const name = typeof w.managed_by === "string" ? w.managed_by : "";
+      hint.classList.remove("bad");
+      hint.textContent = name
+        ? `${name} owns this text. Apply keeps posted lines and saves this name.`
+        : "Leave this empty and the text stays editable here.";
+    };
+    const commit = (value) => {
+      const next = String(value || "").trim().toLowerCase();
+      if (next && !/^[a-z][a-z0-9_-]{0,23}$/.test(next)) return false;
+      snapOnce();
+      if (!next) delete w.managed_by;
+      else w.managed_by = next;
+      onChange();
+      return true;
+    };
+    select.addEventListener("change", () => {
+      if (select.value === "custom") {
+        custom.hidden = false;
+        custom.focus();
+        return;
+      }
+      custom.hidden = true;
+      if (commit(select.value)) renderCards();
+    });
+    custom.addEventListener("input", () => {
+      const next = custom.value.trim().toLowerCase();
+      if (next && !/^[a-z][a-z0-9_-]{0,23}$/.test(next)) {
+        hint.textContent = "Use a short lowercase name such as bots or calendar.";
+        hint.classList.add("bad");
+      } else paintHint();
+    });
+    custom.addEventListener("change", () => {
+      if (!commit(custom.value)) return;
+      renderCards();
+    });
+    wrap.append(field("Managed by", select));
+    wrap.append(custom);
+    paintHint();
+    wrap.append(hint);
     return wrap;
   }
 
@@ -2969,19 +3422,28 @@ function startConfigurator() {
       box.append(field("Caption", input("caption", LIMITS.caption)));
     }
 
+    const ownerControl = renderOwnerControl(entry, onChange, snapOnce);
     if (w.managed_by) {
       // A bot or sync job owns this tile's content. Layout stays editable.
       const added = Array.from(box.childNodes).slice(contentStart);
       for (const node of added) {
+        if (node.classList) node.classList.add("cfg-locked");
         for (const ctl of node.querySelectorAll ? node.querySelectorAll("input, textarea, select") : []) {
           ctl.disabled = true;
           ctl.readOnly = true;
         }
         if (node.matches && node.matches("input, textarea, select")) node.disabled = true;
       }
-      const note = el("p", "cfg-warn cfg-managed-note", `Filled by ${w.managed_by}. Content is read-only here. Size, order, and Show on board still apply.`);
-      note.style.color = "var(--faint)";
-      box.insertBefore(note, box.childNodes[contentStart] || null);
+      const note = el(
+        "p",
+        "cfg-warn cfg-managed-note",
+        `Filled by ${w.managed_by}. Text is locked here. Move, resize, and Show on board still apply.`,
+      );
+      const at = box.childNodes[contentStart] || null;
+      box.insertBefore(note, at);
+      box.insertBefore(ownerControl, at);
+    } else {
+      box.append(ownerControl);
     }
 
     if (w.type !== "stats") box.append(spanButtons(entry, onChange));
@@ -3313,11 +3775,26 @@ function startConfigurator() {
         const clean = computed(e).clean;
         return { ...clean, order: i * 10 };
       });
+      const ownerBefore = new Map(S.server.map((w) => [w.id, w.managed_by || ""]));
       // An older server has no revisions and refuses the extra keys.
       const body = S.layoutRevision != null ? { widgets, keep_managed: true, base_revision: S.layoutRevision } : { widgets };
       await api("PUT", "/api/widgets/import", body);
       step(`Replaced board with ${widgets.length} tile${widgets.length === 1 ? "" : "s"}.`);
-      if (widgets.some((x) => x.managed_by)) step("Managed tiles kept the content their bots posted. Only their layout changed.");
+      if (widgets.some((x) => x.managed_by) || [...ownerBefore.values()].some(Boolean)) {
+        step("Managed tiles kept the content their bots posted. Only their layout changed.");
+      }
+      const ownerEdits = [];
+      for (const e of orderedLive()) {
+        if (!e.origId || !ownerBefore.has(e.origId)) continue;
+        const prev = ownerBefore.get(e.origId) || "";
+        const next = computed(e).clean.managed_by || "";
+        // keep_managed preserves the stored owner. A later PATCH changes only that name.
+        if (prev && next !== prev) ownerEdits.push({ id: e.origId, managed_by: next });
+      }
+      for (const edit of ownerEdits) {
+        await api("PATCH", `/api/widgets/${encodeURIComponent(edit.id)}`, { managed_by: edit.managed_by });
+      }
+      if (ownerEdits.length) step(`Saved the owner on ${ownerEdits.map((edit) => edit.id).join(", ")}.`);
       step("Done. The board picks this up within 5 seconds.");
     } catch (err) {
       if (err.status === 409 && err.data && err.data.stale) {
@@ -3438,6 +3915,10 @@ function startConfigurator() {
   });
 
   window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && S.gesture) {
+      finishGesture();
+      return;
+    }
     if ((ev.metaKey || ev.ctrlKey) && String(ev.key).toLowerCase() === "z") {
       ev.preventDefault();
       undo();
@@ -3445,7 +3926,7 @@ function startConfigurator() {
   });
 
   load()
-    .then(() => say("Loaded the current board. Drop files or edit tiles, check the preview, then Apply."))
+    .then(() => say("Loaded the current board. Drag tiles in the preview, then Apply."))
     .catch((err) => say(`Could not load the board: ${err.message || err}`));
 
   window.__deskcfg = { S, takeFiles, apply, renderCards, parseIcs, parseText, parseJson, parseCsvRows, csvDefaults, board };

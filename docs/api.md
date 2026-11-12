@@ -40,7 +40,7 @@ GET    /api/github
 
 ## Widgets
 
-Every widget has `id`, `type`, `enabled`, `order`, `col_span`, `row_span` (spans are `1` or `2`). Any widget may also carry `managed_by`, a short lowercase owner name such as `bots`. Type-specific fields are listed in [widgets.md](widgets.md).
+Every widget has `id`, `type`, `enabled`, `order`, `col_span`, `row_span` (spans are `1` or `2`). Any widget may also have `managed_by`, a short lowercase owner name such as `bots`. Type-specific fields are listed in [widgets.md](widgets.md).
 
 Unknown fields are rejected. Send only the fields you mean to change on `PATCH`.
 
