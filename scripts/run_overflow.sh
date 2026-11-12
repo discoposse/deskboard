@@ -134,6 +134,37 @@ except Exception as e:
   done
 done
 
+# A long flash title and body, settled, on a short landscape screen and in portrait.
+FLASH_THEMES="${FLASH_THEMES:-warm-dark paper tiling nord}"
+FLASH_SIZES="${FLASH_SIZES:-1024x600 1080x1920 1920x1080}"
+for theme in $FLASH_THEMES; do
+  curl -sf "http://127.0.0.1:18730/api/config" \
+    -X PATCH -H 'Content-Type: application/json' \
+    -d "{\"theme\":\"$theme\"}" >/dev/null
+  for size in $FLASH_SIZES; do
+    w=${size%x*}
+    h=${size#*x}
+    shot="$SHOTS/flash-$theme-$size.png"
+    raw="$("$NODE" "$CDP" "http://127.0.0.1:18730/?check&flash=1" "$w" "$h" "$shot" 2800 'document.documentElement.getAttribute("data-overflow")' || true)"
+    line="$(printf '%s\n' "$raw" | "$PYTHON" -c '
+import json, sys
+w, h = int(sys.argv[1]), int(sys.argv[2])
+raw = sys.stdin.read().strip()
+try:
+    r = json.loads(raw)
+    ok = bool(r.get("ok")) and r.get("viewport") == [w, h] and int(r.get("badCount", 99)) == 0
+    print(("PASS" if ok else "FAIL"), "tiles=%s bad=%s ellipsized=%s" % (r.get("tiles"), r.get("badCount"), r.get("ellipsized")))
+except Exception as e:
+    print("FAIL no report", e, raw[:200])
+' "$w" "$h")"
+    printf '%-8s %-12s %-10s %s\n' "flash" "$theme" "$size" "$line" | tee -a "$report"
+    case "$line" in
+      PASS*) pass=$((pass + 1)) ;;
+      *) fail=$((fail + 1)); echo "  $raw" | head -c 1200; echo ;;
+    esac
+  done
+done
+
 echo "overall: pass=$pass fail=$fail" | tee -a "$report"
 if [[ "$fail" -ne 0 ]]; then
   exit 1

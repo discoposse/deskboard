@@ -66,6 +66,31 @@ class ToolTests(BoardCase):
         self.assertRegex(out["posted"], r"^\d{1,2}:\d\d (AM|PM)  Backup  Backup finished$")
         self.assertEqual(self.items("botstatus")[0], out["posted"])
 
+    def test_post_flash_reaches_the_board(self):
+        import flashes
+
+        flashes.reset_flashes()
+        ok, out = self.m.call_tool(
+            "post_flash",
+            {"title": "Leave in 10 minutes", "body": "Downtown review starts soon.", "source": "Calendar", "level": "warning", "duration": 30},
+        )
+        self.assertTrue(ok, out)
+        self.assertEqual(out["title"], "Leave in 10 minutes")
+        self.assertEqual(out["level"], "warning")
+        self.assertEqual(out["duration"], 30)
+        self.assertFalse(out["deduped"])
+        again, replay = self.m.call_tool(
+            "post_flash",
+            {"title": "Leave in 10 minutes", "body": "Downtown review starts soon.", "source": "Calendar", "level": "warning"},
+        )
+        self.assertTrue(again, replay)
+        self.assertTrue(replay["deduped"])
+        self.assertEqual(replay["id"], out["id"])
+        ok, msg = self.m.call_tool("post_flash", {"title": "Hi", "body": "There", "level": "panic"})
+        self.assertFalse(ok)
+        self.assertIn("level", msg)
+        flashes.reset_flashes()
+
     def test_default_source_comes_from_env(self):
         os.environ["DESKBOARD_SOURCE"] = "Night bot"
         ok, out = self.m.call_tool("post_status", {"text": "hello"})
@@ -128,7 +153,7 @@ class ToolTests(BoardCase):
         self.assertIn("timezone", out["status"])
 
     def test_only_safe_tools_exist(self):
-        self.assertEqual(sorted(self.m.TOOLS), ["board_status", "list_tiles", "post_status", "read_tile"])
+        self.assertEqual(sorted(self.m.TOOLS), ["board_status", "list_tiles", "post_flash", "post_status", "read_tile"])
 
 
 class OldServerHandler(BaseHTTPRequestHandler):
@@ -217,7 +242,7 @@ class StdioTests(BoardCase):
         self.assertEqual([m.get("id") for m in out], [1, 2, 3, 4, 5])
         self.assertEqual(out[0]["result"]["protocolVersion"], "2025-06-18")
         self.assertEqual(out[0]["result"]["serverInfo"]["name"], "deskboard")
-        self.assertEqual(sorted(t["name"] for t in out[1]["result"]["tools"]), ["board_status", "list_tiles", "post_status", "read_tile"])
+        self.assertEqual(sorted(t["name"] for t in out[1]["result"]["tools"]), ["board_status", "list_tiles", "post_flash", "post_status", "read_tile"])
         self.assertFalse(out[2]["result"]["isError"])
         self.assertIn("Stdio bot  over stdio", out[2]["result"]["structuredContent"]["posted"])
         self.assertTrue(out[3]["result"]["isError"])

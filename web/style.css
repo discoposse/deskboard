@@ -1666,3 +1666,185 @@ html.cfg body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* ---------- flash overlay ---------- */
+
+.flash {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 4vh 4vw;
+  background: var(--bg);
+  color: var(--ink);
+  animation: flash-fade 480ms ease both;
+}
+
+.flash[hidden] {
+  display: none !important;
+}
+
+.flash-sheet {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: clamp(10px, 2vh, 22px);
+  padding: clamp(22px, 4.5vh, 64px) clamp(22px, 5vw, 72px) clamp(18px, 3vh, 36px);
+  overflow: hidden;
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink)),
+    linear-gradient(var(--ink), var(--ink));
+  background-repeat: no-repeat;
+  background-size: 28px 1px, 1px 28px, 28px 1px, 1px 28px, 28px 1px, 1px 28px, 28px 1px, 1px 28px;
+  background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
+  border: 1px solid var(--line);
+  animation: flash-rise 520ms cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+.flash-main {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(10px, 2vh, 22px);
+  margin-top: auto;
+  margin-bottom: auto;
+  min-height: 0;
+}
+
+.flash-kicker {
+  margin: 0;
+  font-size: clamp(12px, 1.6vh, 16px);
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--flash-ink, var(--accent));
+}
+
+.flash-title {
+  margin: 0;
+  max-width: 18em;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.flash-body {
+  margin: 0;
+  max-width: 34em;
+  font-size: 28px;
+  line-height: 1.35;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.flash-meter {
+  position: relative;
+  height: 3px;
+  margin-top: clamp(12px, 2vh, 28px);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.flash-meter i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--flash-ink, var(--accent));
+  transform-origin: left center;
+}
+
+.flash-count {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: clamp(12px, 1.8vh, 18px);
+  letter-spacing: 0.14em;
+  color: var(--faint);
+}
+
+.flash[data-level="info"] {
+  --flash-ink: var(--accent);
+}
+
+.flash[data-level="warning"] {
+  --flash-ink: var(--warn);
+}
+
+.flash[data-level="urgent"] {
+  --flash-ink: var(--bad);
+}
+
+.flash.tiling .flash-sheet {
+  border-radius: 0;
+}
+
+.flash.is-settled,
+.flash.is-settled .flash-sheet,
+.flash.is-leaving.is-settled,
+.flash.is-leaving.is-settled .flash-sheet {
+  animation: none;
+}
+
+.flash.is-leaving {
+  animation: flash-fade-out 420ms ease both;
+}
+
+.flash.is-leaving .flash-sheet {
+  animation: flash-rise-out 420ms ease both;
+}
+
+@keyframes flash-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes flash-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes flash-rise {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes flash-rise-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash,
+  .flash.is-leaving {
+    animation-name: flash-fade;
+    animation-duration: 180ms;
+  }
+
+  .flash.is-leaving {
+    animation-name: flash-fade-out;
+    animation-duration: 160ms;
+  }
+
+  .flash .flash-sheet,
+  .flash.is-leaving .flash-sheet {
+    animation: none;
+  }
+}

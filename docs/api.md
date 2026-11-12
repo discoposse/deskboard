@@ -24,6 +24,8 @@ DELETE /api/widgets/{id}
 PUT    /api/widgets/order
 PUT    /api/widgets/import
 POST   /api/widgets/{id}/post
+GET    /api/flash
+POST   /api/flash
 GET    /api/widget-data/{id}
 GET    /api/github
 ```
@@ -51,6 +53,14 @@ Unknown fields are rejected. Send only the fields you mean to change on `PATCH`.
 `GET /api/widgets` returns `{"widgets": [...], "revision": 12, "layout_revision": 11}`. Widget responses carry the same numbers in `X-Deskboard-Revision` and `X-Deskboard-Layout-Revision`. Send `If-Match: <layout_revision>` on any widget write to make it conditional. A stale write gets `409` with `"stale": true` and changes nothing. Writes without a revision are not checked.
 
 `POST /api/widgets/{id}/post` with `{"source":"Backup","text":"Nightly backup finished"}` adds a timestamped line to the top of a list tile and keeps the newest `max_items`. It returns `404` for a missing or hidden tile and never creates one. See [bots.md](bots.md).
+
+## Flash
+
+`POST /api/flash` puts a full-screen notice on the board. Send `title`, `body`, and `source`. `level` may be `info`, `warning`, or `urgent`. When you omit it, the level is `info`. `duration` is a whole number of seconds. The default is 30. A number below 5 is stored as 5, and a number above 120 is stored as 120.
+
+The board eases the notice in, keeps it up for that many seconds, and eases it out. A pointer tap can close it sooner. Nothing on the kiosk has to be pressed.
+
+`GET /api/flash` returns the notices still waiting. They are kept in memory only. The same title, body, level, and source posted again within 60 seconds returns the first notice and sets `deduped` to true. A notice that is still waiting after its duration plus two minutes is dropped. At most 6 notices wait at once.
 
 ## Tiles
 

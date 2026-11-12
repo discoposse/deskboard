@@ -67,6 +67,26 @@ DESKBOARD_URL=http://<your-board-url>:8730 scripts/post.sh botstatus Backup "Nig
 
 It prints the posted line and exits 0. It exits 1 when the server refuses the post and 2 when it cannot reach the server.
 
+## Flash a notice
+
+`POST /api/flash` covers most of the screen with a short plain-text notice. The board eases it in and closes it on its own. The default time is 30 seconds. You can ask for 5 to 120. A tap closes it early when a pointer is present. A kiosk with no pointer still clears the notice when the time ends.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8730/api/flash \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"Calendar","title":"Leave in 10 minutes","body":"Downtown review starts soon.","level":"warning","duration":30}'
+```
+
+`scripts/flash.sh` wraps the same call.
+
+```bash
+scripts/flash.sh Calendar "Leave in 10 minutes" "Downtown review starts soon." warning 30
+```
+
+`level` is `info`, `warning`, or `urgent`. The same title, body, level, and source inside one minute does not stack a second notice. Different notices play one after another. A notice still waiting after its time plus two minutes is dropped. The list is kept in memory only.
+
+Assistants that speak MCP can call `post_flash` with the same fields. [mcp.md](mcp.md) has the setup.
+
 ## How to get your bot to update your Deskboard
 
 1. Create a list tile for your bots and mark it managed, for example `botstatus` with `"managed_by": "bots"`.

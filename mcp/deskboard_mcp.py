@@ -5,7 +5,7 @@ Lets AI assistants post status lines to a Deskboard and read what is on it.
 It speaks MCP over stdio with the standard library only. `--http` serves
 streamable HTTP on 127.0.0.1 through the official `mcp` SDK when installed.
 
-Tools: post_status, list_tiles, read_tile, board_status. There are no tools
+Tools: post_status, post_flash, list_tiles, read_tile, board_status. There are no tools
 that create, delete, move, resize, theme, or import tiles.
 
 Environment
@@ -31,6 +31,8 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 SOURCE_MAX = 24
 TEXT_MAX = 200
+FLASH_TITLE_MAX = 80
+FLASH_BODY_MAX = 400
 TIMEOUT = 10
 # Fields from GET /api/status that could identify the machine. Left out.
 PRIVATE_STATUS_KEYS = {"hostname", "host", "ip", "ips", "addr", "address", "addresses", "bind", "binds"}
@@ -157,6 +159,52 @@ def post_status(text, source=None, widget: str = "botstatus") -> dict:
     return {"posted": items[0] if items else "", "widget": widget, "lines": items}
 
 
+def _block(value, field: str, limit: int) -> str:
+    if not isinstance(value, str):
+        raise BoardError(f"{field} must be text.")
+    if any(ord(ch) < 32 and ch not in "\n\r" or ord(ch) == 127 for ch in value):
+        raise BoardError(f"{field} must be plain text with no tabs or control characters.")
+    lines = [" ".join(line.split()) for line in value.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    lines = [line for line in lines if line]
+    if not lines:
+        raise BoardError(f"{field} must not be empty.")
+    text = "\n".join(lines)
+    if len(text) > limit:
+        raise BoardError(f"{field} is limited to {limit} characters. Keep it short.")
+    return text
+
+
+def post_flash(title, body, source=None, level=None, duration=None) -> dict:
+    payload = {
+        "title": _plain(title, "title", FLASH_TITLE_MAX),
+        "body": _block(body, "body", FLASH_BODY_MAX),
+        "source": _plain(source if source not in (None, "") else default_source(), "source", SOURCE_MAX),
+    }
+    if level not in (None, ""):
+        if level not in ("info", "warning", "urgent"):
+            raise BoardError("level must be info, warning, or urgent.")
+        payload["level"] = level
+    if duration is not None:
+        if isinstance(duration, bool) or not isinstance(duration, int):
+            raise BoardError("duration must be a whole number of seconds.")
+        payload["duration"] = duration
+    code, result = _request("POST", "/api/flash", payload)
+    if code in (404, 405):
+        raise BoardError(
+            f"The board at {board_url()} has no flash route (HTTP {code}). It runs an older Deskboard server. "
+            "Update it and restart the service, then try again."
+        )
+    if code != 200 or not isinstance(result, dict):
+        raise BoardError(f"The board refused the flash (HTTP {code}): {_error_text(result)}")
+    return {
+        "id": result.get("id"),
+        "title": result.get("title"),
+        "level": result.get("level"),
+        "duration": result.get("duration"),
+        "deduped": bool(result.get("deduped")),
+    }
+
+
 def list_tiles() -> dict:
     code, payload = _request("GET", "/api/widgets")
     if code != 200 or not isinstance(payload, dict) or not isinstance(payload.get("widgets"), list):
@@ -191,6 +239,26 @@ TOOLS = {
                 "widget": {"type": "string", "description": "Tile id. Defaults to botstatus.", "default": "botstatus"},
             },
             "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+    "post_flash": {
+        "fn": post_flash,
+        "description": (
+            "Show one plain-text flash on the Deskboard. It fills most of the screen, eases in, and closes itself. "
+            "Use it for a time-sensitive notice such as a calendar warning. No secrets, tokens, or private mail. "
+            "duration is seconds from 5 to 120. The default is 30. level is info, warning, or urgent."
+        ),
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short headline, one line.", "maxLength": FLASH_TITLE_MAX},
+                "body": {"type": "string", "description": "Plain text notice. A few short lines at most.", "maxLength": FLASH_BODY_MAX},
+                "source": {"type": "string", "description": "Who is posting, for example Calendar.", "maxLength": SOURCE_MAX},
+                "level": {"type": "string", "enum": ["info", "warning", "urgent"], "description": "info, warning, or urgent. Defaults to info."},
+                "duration": {"type": "integer", "minimum": 5, "maximum": 120, "description": "Seconds on screen. Defaults to 30."},
+            },
+            "required": ["title", "body"],
             "additionalProperties": False,
         },
     },
@@ -274,7 +342,8 @@ def handle(message: dict) -> dict | None:
                 "serverInfo": {"name": SERVER_NAME, "version": VERSION},
                 "instructions": (
                     "Post short plain-text status lines with post_status when a job finishes, fails, or needs the owner. "
-                    "Never include secrets, tokens, or private mail. The board cannot be changed in any other way through this server."
+                    "Post a full-screen flash with post_flash for a time-sensitive notice such as a calendar warning. "
+                    "Never include secrets, tokens, or private mail. Do not create, delete, move, or restyle tiles."
                 ),
             }
         )
@@ -353,6 +422,16 @@ def serve_http(port: int) -> None:
     @server.tool(name="post_status", description=TOOLS["post_status"]["description"])
     def _post(text: str, source: str = "", widget: str = "botstatus") -> dict:
         return wrap("post_status")(text=text, source=source or None, widget=widget)
+
+    @server.tool(name="post_flash", description=TOOLS["post_flash"]["description"])
+    def _flash(title: str, body: str, source: str = "", level: str = "", duration: int = 0) -> dict:
+        return wrap("post_flash")(
+            title=title,
+            body=body,
+            source=source or None,
+            level=level or None,
+            duration=duration or None,
+        )
 
     @server.tool(name="list_tiles", description=TOOLS["list_tiles"]["description"])
     def _list() -> dict:

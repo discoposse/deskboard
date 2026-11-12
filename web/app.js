@@ -1383,6 +1383,32 @@ class Board {
   }
 }
 
+function flashProblems(flash) {
+  if (!flash || flash.hidden) return [];
+  const bad = [];
+  const sheet = flash.querySelector(".flash-sheet");
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const nodes = [flash, sheet].concat(sheet ? Array.from(sheet.querySelectorAll("*")) : []);
+  for (const node of nodes) {
+    if (!node) continue;
+    const r = node.getBoundingClientRect();
+    if (r.width === 0 && r.height === 0) continue;
+    if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) {
+      bad.push({ kind: "viewport", node: String(node.className || node.tagName), rect: [r.left, r.top, r.right, r.bottom].map(Math.round) });
+    }
+  }
+  if (sheet && (sheet.scrollHeight > sheet.clientHeight + 1 || sheet.scrollWidth > sheet.clientWidth + 1)) {
+    bad.push({ kind: "scroll", node: "flash-sheet", sh: sheet.scrollHeight, ch: sheet.clientHeight, sw: sheet.scrollWidth, cw: sheet.clientWidth });
+  }
+  const title = flash.querySelector(".flash-title");
+  const body = flash.querySelector(".flash-body");
+  for (const node of [title, body]) {
+    if (node && node.scrollWidth > node.clientWidth + 1) bad.push({ kind: "scroll", node: String(node.className), sw: node.scrollWidth, cw: node.clientWidth });
+  }
+  return bad;
+}
+
 function overflowReport(root) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -1438,6 +1464,186 @@ function overflowReport(root) {
   };
 }
 
+/* ---------- flash overlay ---------- */
+
+const FLASH_SAMPLE = {
+  id: "sample-flash",
+  title: "Leave soon for the afternoon review in the downtown room",
+  body: "The calendar reminder is long on purpose. It has to stay inside a short landscape screen and a tall portrait screen. Bring the notes from the desk. The room is down the hall. This notice closes on its own.",
+  level: "warning",
+  source: "Calendar",
+  duration: 30,
+  created: 0,
+  expires: 9e9,
+};
+
+function installFlash(board) {
+  const root = el("div", "flash");
+  root.hidden = true;
+  root.setAttribute("role", "status");
+  const sheet = el("div", "flash-sheet");
+  const kicker = el("p", "flash-kicker");
+  const title = el("p", "flash-title");
+  const body = el("p", "flash-body");
+  const main = el("div", "flash-main");
+  main.append(kicker, title, body);
+  const meter = el("div", "flash-meter");
+  const bar = el("i");
+  meter.append(bar);
+  const count = el("p", "flash-count", "");
+  sheet.append(main, meter, count);
+  root.append(sheet);
+  document.body.append(root);
+
+  const seen = new Set();
+  const queued = new Set();
+  const queue = [];
+  let current = null;
+  let timer = 0;
+  let leaving = false;
+
+  function motionMs(out) {
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) return out ? 160 : 180;
+    return out ? 420 : 520;
+  }
+
+  function syncTheme() {
+    if (!board.root) return;
+    const style = getComputedStyle(board.root);
+    for (const key of ["--ink", "--bg", "--muted", "--faint", "--line", "--accent", "--warn", "--bad", "--font-ui", "--font-display", "--font-mono"]) {
+      const value = style.getPropertyValue(key).trim();
+      if (value) root.style.setProperty(key, value);
+    }
+    root.classList.toggle("tiling", board.root.classList.contains("tiling"));
+  }
+
+  function fit() {
+    if (root.hidden) return;
+    const u = board.u || 1;
+    let titleSize = Math.min(88, Math.max(28, window.innerHeight * 0.078));
+    let bodySize = Math.min(34, Math.max(18, window.innerHeight * 0.038));
+    title.style.fontSize = `${titleSize}px`;
+    body.style.fontSize = `${bodySize * u}px`;
+    let guard = 0;
+    while (sheet.scrollHeight > sheet.clientHeight + 1 && guard < 28) {
+      guard += 1;
+      titleSize = Math.max(22, titleSize * 0.92);
+      bodySize = Math.max(15, bodySize * 0.92);
+      title.style.fontSize = `${titleSize}px`;
+      body.style.fontSize = `${bodySize}px`;
+    }
+  }
+
+  function paint(item) {
+    const level = item.level === "urgent" || item.level === "warning" ? item.level : "info";
+    root.dataset.level = level;
+    const label = level === "urgent" ? "Urgent" : level === "warning" ? "Warning" : "Info";
+    kicker.textContent = `${label}  ${item.source || ""}`.trim();
+    title.textContent = item.title || "";
+    body.textContent = item.body || "";
+    count.textContent = String(item.duration || 30);
+    bar.style.transform = "scaleX(1)";
+  }
+
+  function closeFlash() {
+    if (!current || leaving) return;
+    leaving = true;
+    window.clearInterval(timer);
+    root.classList.add("is-leaving");
+    window.setTimeout(() => {
+      root.classList.remove("is-leaving");
+      root.hidden = true;
+      current = null;
+      leaving = false;
+      pump();
+    }, motionMs(true));
+  }
+
+  function openFlash(item, settled) {
+    current = item;
+    seen.add(item.id);
+    syncTheme();
+    paint(item);
+    root.classList.toggle("is-settled", Boolean(settled));
+    root.hidden = false;
+    fit();
+    const total = Math.max(1, Number(item.duration) || 30) * 1000;
+    const started = performance.now();
+    window.clearInterval(timer);
+    timer = window.setInterval(() => {
+      const left = total - (performance.now() - started);
+      const ratio = Math.max(0, left / total);
+      bar.style.transform = `scaleX(${ratio})`;
+      count.textContent = String(Math.max(0, Math.ceil(left / 1000)));
+      if (left <= 0) closeFlash();
+    }, 100);
+  }
+
+  function pump() {
+    if (current || leaving) return;
+    const now = Date.now() / 1000;
+    while (queue.length) {
+      const next = queue.shift();
+      queued.delete(next.id);
+      if (seen.has(next.id)) continue;
+      if (Number(next.expires) <= now) {
+        seen.add(next.id);
+        continue;
+      }
+      openFlash(next, false);
+      return;
+    }
+  }
+
+  function enqueue(items) {
+    const now = Date.now() / 1000;
+    for (const item of items || []) {
+      if (!item || typeof item.id !== "string") continue;
+      if (seen.has(item.id) || queued.has(item.id) || (current && current.id === item.id)) continue;
+      if (Number(item.expires) <= now) continue;
+      queued.add(item.id);
+      queue.push(item);
+    }
+    pump();
+  }
+
+  root.addEventListener("pointerdown", (ev) => {
+    if (!current) return;
+    ev.preventDefault();
+    closeFlash();
+  });
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") closeFlash();
+  });
+  window.addEventListener("resize", fit);
+
+  async function poll() {
+    try {
+      const res = await fetch("/api/flash", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      enqueue(data.flashes);
+    } catch (_err) {
+      /* the board keeps showing whatever is already up */
+    }
+  }
+
+  let sampleShown = false;
+  function showSample() {
+    if (sampleShown) {
+      fit();
+      return;
+    }
+    sampleShown = true;
+    openFlash(FLASH_SAMPLE, PARAMS.has("check"));
+  }
+
+  if (!PARAMS.has("check")) setInterval(poll, 1000);
+  poll();
+  return { showSample, fit, root };
+}
+
 /* ---------- kiosk mode ---------- */
 
 function startKiosk() {
@@ -1446,6 +1652,7 @@ function startKiosk() {
   clear(document.body);
   document.body.append(root);
   const board = new Board(root);
+  const flashes = installFlash(board);
   const bootedAt = Date.now();
   let widgets = [];
   let themeReady = false;
@@ -1517,11 +1724,23 @@ function startKiosk() {
     } catch (_err) {
       root.classList.add("stale");
     }
+    if (PARAMS.has("flash")) flashes.showSample();
     if (PARAMS.has("check") && !checked) {
       checked = true;
       const run = () => {
         board.fit();
-        document.documentElement.setAttribute("data-overflow", JSON.stringify(overflowReport(root)));
+        if (PARAMS.has("flash")) {
+          flashes.showSample();
+          flashes.fit();
+        }
+        const report = overflowReport(root);
+        const extra = flashProblems(flashes.root);
+        if (extra.length) {
+          report.bad = report.bad.concat(extra);
+          report.badCount += extra.length;
+          report.ok = false;
+        }
+        document.documentElement.setAttribute("data-overflow", JSON.stringify(report));
       };
       if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => setTimeout(run, 150));
       else setTimeout(run, 150);
